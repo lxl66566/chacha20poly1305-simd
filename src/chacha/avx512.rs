@@ -231,6 +231,38 @@ pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
     }
 }
 
+/// Fused prologue: blocks 0 and 1 in one quad call — block 0's first 32
+/// bytes (the Poly1305 one-time key) to `key_out`, block 1's keystream
+/// XORed into `b1` (a zeroed buffer yields the raw keystream).
+#[inline(always)]
+pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
+    let v = rows(state);
+    let c = ctr_row(state, state.words[12], 0);
+    state.advance(2);
+    let [a, b, cc, d] = rounds1(&v, c);
+    // block 0 words 0..7 (bytes 0..31) = [a|b] lane 0
+    _mm256_storeu_si256(
+        key_out.as_mut_ptr().cast(),
+        _mm256_permute2f128_si256::<0x20>(a, b),
+    );
+    // block 1 = [a|b|c|d] lane 1, xored into b1
+    let p = b1.as_mut_ptr().cast::<__m256i>();
+    _mm256_storeu_si256(
+        p,
+        _mm256_xor_si256(
+            _mm256_loadu_si256(p),
+            _mm256_permute2f128_si256::<0x31>(a, b),
+        ),
+    );
+    _mm256_storeu_si256(
+        p.add(1),
+        _mm256_xor_si256(
+            _mm256_loadu_si256(p.add(1)),
+            _mm256_permute2f128_si256::<0x31>(cc, d),
+        ),
+    );
+}
+
 /// Single-block (64-byte) kernel in XMM registers.
 #[inline(always)]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
@@ -287,7 +319,9 @@ unsafe fn quarter(a: &mut __m128i, b: &mut __m128i, c: &mut __m128i, d: &mut __m
     *b = _mm_rol_epi32::<7>(*b);
 }
 
-/// Generate exactly one keystream block (no XOR, no advance).
+/// Generate exactly one keystream block (no XOR, no advance). Test
+/// reference target only — the engine uses the fused [`gen_key_xor2`].
+#[cfg(test)]
 #[inline(always)]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let p = state.words.as_ptr().cast::<__m128i>();

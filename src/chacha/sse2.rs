@@ -134,6 +134,38 @@ unsafe fn rounds4(v: &[__m128i; 3], ctrs: &[__m128i; 4]) -> [[__m128i; 4]; BATCH
     ]
 }
 
+/// Full 20 rounds + feed-forward on 2 interleaved blocks (the OpenSSL
+/// `ChaCha20_128` shape: dedicated 2-block kernel, no loop machinery).
+#[inline(always)]
+unsafe fn rounds2(v: &[__m128i; 3], ctrs: &[__m128i; 2]) -> [[__m128i; 4]; 2] {
+    let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
+    let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], ctrs[1]);
+    for _ in 0..10 {
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        to_cols!(a0, b0, c0, d0);
+        to_cols!(a1, b1, c1, d1);
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        to_rows!(a0, b0, c0, d0);
+        to_rows!(a1, b1, c1, d1);
+    }
+    [
+        [
+            _mm_add_epi32(a0, v[0]),
+            _mm_add_epi32(b0, v[1]),
+            _mm_add_epi32(c0, v[2]),
+            _mm_add_epi32(d0, ctrs[0]),
+        ],
+        [
+            _mm_add_epi32(a1, v[0]),
+            _mm_add_epi32(b1, v[1]),
+            _mm_add_epi32(c1, v[2]),
+            _mm_add_epi32(d1, ctrs[1]),
+        ],
+    ]
+}
+
 /// XOR one finished block's rows into `buf` (64 bytes).
 #[inline(always)]
 unsafe fn emit_xor_block(quad: &[__m128i; 4], buf: *mut u8) {
@@ -164,7 +196,30 @@ pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
     }
 }
 
-/// Generate exactly one keystream block (no XOR, no advance).
+/// Fused prologue: blocks 0 and 1 in one interleaved kernel call — block
+/// 0's first 32 bytes (the Poly1305 one-time key) to `key_out`, block 1's
+/// keystream XORed into `b1` (a zeroed buffer yields the raw keystream).
+#[inline(always)]
+pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
+    let v = rows(state);
+    let base = state.words[12];
+    let ctrs = [ctr_row(state, base, 0), ctr_row(state, base, 1)];
+    state.advance(2);
+    let [blk0, blk1] = rounds2(&v, &ctrs);
+    // key = block 0 bytes 0..31 = rows a|b
+    let k = key_out.as_mut_ptr().cast::<__m128i>();
+    _mm_storeu_si128(k, blk0[0]);
+    _mm_storeu_si128(k.add(1), blk0[1]);
+    // block 1 xored into b1
+    let p = b1.as_mut_ptr().cast::<__m128i>();
+    for i in 0..4 {
+        _mm_storeu_si128(p.add(i), _mm_xor_si128(_mm_loadu_si128(p.add(i)), blk1[i]));
+    }
+}
+
+/// Generate exactly one keystream block (no XOR, no advance). Test
+/// reference target only — the engine uses the fused [`gen_key_xor2`].
+#[cfg(test)]
 #[inline(always)]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let [a, b, c, d] = rounds1(state);

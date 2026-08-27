@@ -14,8 +14,9 @@ impl Ops for NeonOps {
     const CHACHA_BATCH: usize = crate::chacha::neon::BATCH_BLOCKS;
 
     #[inline(always)]
-    unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
-        crate::chacha::neon::gen_block(state, out);
+    unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
+        debug_assert_eq!(b1.len(), BLOCK);
+        crate::chacha::neon::gen_key_xor2(state, key_out, b1.try_into().unwrap());
     }
 
     #[inline(always)]
@@ -40,12 +41,6 @@ impl Ops for NeonOps {
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         debug_assert_eq!(buf.len(), 256);
         crate::chacha::neon::xor_batch4(state, buf.as_mut_ptr());
-    }
-
-    #[inline(always)]
-    unsafe fn xor_block1(state: &mut State, buf: &mut [u8]) {
-        debug_assert_eq!(buf.len(), BLOCK);
-        crate::chacha::neon::xor_single(state, buf.as_mut_ptr());
     }
 }
 

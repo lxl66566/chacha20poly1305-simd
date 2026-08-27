@@ -29,16 +29,18 @@ pub(crate) trait Ops {
     /// Poly1305 backend.
     type Poly: crate::poly1305::Backend;
 
-    /// Generate one keystream block at the current counter, without advancing.
-    unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]);
+    /// Compute keystream blocks 0 and 1 in a single kernel invocation
+    /// (OpenSSL fuses its TLS path the same way): block 0's first 32 bytes
+    /// (the Poly1305 one-time key) go to `key_out`, block 1's keystream is
+    /// XORed into `b1` (`b1.len() == BLOCK`; a zeroed buffer therefore
+    /// yields the raw keystream). Advances the counter by 2.
+    unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]);
     /// XOR `buf` (any length) with the keystream, advancing the counter.
     /// Backends batch internally.
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]);
     /// XOR exactly `CHACHA_BATCH * 64` bytes, advancing the counter.
     /// Hot loop path; may assume full batches.
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]);
-    /// XOR exactly one 64-byte block (the engine prologue).
-    unsafe fn xor_block1(state: &mut State, buf: &mut [u8]);
 }
 
 /// Largest message the IETF 32-bit counter can address (256 GiB - 64 KiB).
@@ -54,6 +56,22 @@ fn ct_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
         acc |= a[i] ^ b[i];
     }
     acc == 0
+}
+
+/// `dst ^= src` over equal-length slices, 8 bytes at a time so LLVM lowers
+/// it to wide loads/stores instead of byte ops.
+#[inline(always)]
+fn xor_bytes(dst: &mut [u8], src: &[u8]) {
+    debug_assert_eq!(dst.len(), src.len());
+    let (chunks, tail) = dst.as_chunks_mut::<8>();
+    let (srcs, _) = src.as_chunks::<8>();
+    for (d, s) in chunks.iter_mut().zip(srcs) {
+        *d = (u64::from_le_bytes(*d) ^ u64::from_le_bytes(*s)).to_le_bytes();
+    }
+    let base = src.len() - tail.len();
+    for (i, d) in tail.iter_mut().enumerate() {
+        *d ^= src[base + i];
+    }
 }
 
 /// Fused seal (encrypt + MAC). Writes the tag into `tag_out`.
@@ -99,12 +117,25 @@ unsafe fn process<O: Ops, const SEAL: bool>(
     // SAFETY: callers (seal/open) received target-feature guarantees from the
     // backend entry points.
     unsafe {
-        // ── Keystream block 0 → Poly1305 one-time key; its tail is discarded ──
-        let mut ks0 = [0u8; BLOCK];
-        O::gen_block(state, &mut ks0);
-        let mut poly = Poly::<O::Poly>::new(ks0[..32].try_into().unwrap());
-        crate::poly1305::clear_key(&mut ks0[..32]);
-        state.advance(1);
+        // ── Blocks 0 + 1 in ONE kernel call ──
+        // Block 0's first 32 bytes are the Poly1305 one-time key, block 1 is
+        // the first message keystream. A single quad serves both (the old
+        // shape computed 3 blocks to use 2: one 2-block call for the key
+        // discarding block 1, then a separate call for the message).
+        // Seal XORs block 1 straight into the message when it is long
+        // enough; otherwise (short seals, all opens) the keystream parks in
+        // `ks1` — the MAC must read pristine ciphertext before the XOR
+        // destroys it, so open applies it only after absorbing msg[..BLOCK].
+        let mut key32 = [0u8; 32];
+        let mut ks1 = [0u8; BLOCK];
+        let fused_into_msg = SEAL && msg.len() >= BLOCK;
+        if fused_into_msg {
+            O::gen_key_xor2(state, &mut key32, &mut msg[..BLOCK]);
+        } else {
+            O::gen_key_xor2(state, &mut key32, &mut ks1);
+        }
+        let mut poly = Poly::<O::Poly>::new(&key32);
+        crate::poly1305::clear_key(&mut key32);
 
         // ── MAC the (zero-padded) AAD ──
         poly.update(aad);
@@ -128,28 +159,37 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         let mut poly_off;
 
         if msg.len() < BLOCK + s {
-            // No bulk loop will run: xor (or authenticate, for open) the whole
-            // partial-block message through the generic path.
+            // No bulk loop will run: finish the whole partial-block message
+            // through the generic path. Block 1's keystream is already in
+            // hand (xored into msg by the fused call for long seals, parked
+            // in `ks1` otherwise).
             if !SEAL {
                 poly.update(msg);
             }
-            O::chacha_xor(state, msg);
+            if !fused_into_msg {
+                let n = msg.len().min(BLOCK);
+                xor_bytes(&mut msg[..n], &ks1[..n]);
+            }
+            if msg.len() > BLOCK {
+                O::chacha_xor(state, &mut msg[BLOCK..]);
+            }
             if SEAL {
                 poly.update(msg);
             }
             off = msg.len();
             poly_off = msg.len();
         } else {
-            // Prologue: keystream block 1 + the poly alignment window. When s > 0
-            // the first 4-block window straddles blocks 1 and 2.
+            // Prologue: the poly alignment window. Block 1 was consumed by
+            // the fused call above; when s > 0 the first 4-block window
+            // straddles blocks 1 and 2.
             if SEAL {
-                O::xor_block1(state, &mut msg[..BLOCK]);
+                // (block 1 was xored into msg by the fused call)
                 poly.update(&msg[..s]);
                 poly_off = s;
             } else {
                 poly.update(&msg[..s]);
                 poly.absorb4(msg[s..s + BLOCK].try_into().unwrap());
-                O::xor_block1(state, &mut msg[..BLOCK]);
+                xor_bytes(&mut msg[..BLOCK], &ks1);
                 poly_off = s + BLOCK;
             }
             off = BLOCK;

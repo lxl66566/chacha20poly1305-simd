@@ -244,6 +244,19 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     }
 }
 
+/// Fused prologue for the AEAD engine: block 0's first 32 bytes (the
+/// Poly1305 one-time key) to `key_out`, block 1's keystream XORed into
+/// `b1`. Composed from the single-block kernels — a dedicated 2-lane
+/// kernel would save little here (x86-64 is the perf focus of this crate).
+#[inline(always)]
+pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
+    let mut blk0 = [0u8; BLOCK];
+    gen_block(state, &mut blk0);
+    key_out.copy_from_slice(&blk0[..32]);
+    state.advance(1);
+    xor_single(state, b1.as_mut_ptr());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

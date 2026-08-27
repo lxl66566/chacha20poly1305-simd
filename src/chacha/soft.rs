@@ -50,6 +50,21 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     }
 }
 
+/// Fused AEAD prologue: block 0's first 32 bytes (one-time key) to
+/// `key_out`, block 1's keystream XORed into `b1`.
+#[inline(always)]
+pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
+    let mut ks = [0u8; BLOCK];
+    gen_block(state, &mut ks);
+    key_out.copy_from_slice(&ks[..32]);
+    state.advance(1);
+    gen_block(state, &mut ks);
+    state.advance(1);
+    for (b, k) in b1.iter_mut().zip(ks) {
+        *b ^= k;
+    }
+}
+
 /// XOR `buf` with the keystream starting at `state`'s counter, advancing one
 /// counter per 64-byte block.
 #[inline(always)]
