@@ -308,6 +308,65 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
     );
 }
 
+/// Small-message fused op (the OpenSSL `chacha20_poly1305_tls_cipher`
+/// shape): ONE kernel call computes block 0 (first 32 bytes = the Poly1305
+/// one-time key → `key_out`) and the RAW keystream blocks covering a
+/// ≤ 3·BLOCK-byte message, stored to `ks` (`ks.len()` must be
+/// `ceil(msg_len / BLOCK) * BLOCK`, 0 for an empty message). Advances the
+/// counter by `1 + ks.len() / BLOCK`; the engine XORs `ks` into the
+/// message at whichever pipeline stage the MAC ordering requires.
+#[inline(always)]
+pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
+    debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
+    if ks.is_empty() {
+        let v = rows(state);
+        let c = ctr_row(state, state.words[12], 0);
+        state.advance(1);
+        let [a, b, _, _] = rounds1(&v, c);
+        _mm256_storeu_si256(
+            key_out.as_mut_ptr().cast(),
+            _mm256_permute2f128_si256::<0x20>(a, b),
+        );
+        return;
+    }
+    let v = rows(state);
+    if ks.len() == BLOCK {
+        let c = ctr_row(state, state.words[12], 0);
+        state.advance(2);
+        let [a, b, cc, d] = rounds1(&v, c);
+        _mm256_storeu_si256(
+            key_out.as_mut_ptr().cast(),
+            _mm256_permute2f128_si256::<0x20>(a, b),
+        );
+        let p = ks.as_mut_ptr().cast::<__m256i>();
+        _mm256_storeu_si256(p, _mm256_permute2f128_si256::<0x31>(a, b));
+        _mm256_storeu_si256(p.add(1), _mm256_permute2f128_si256::<0x31>(cc, d));
+    } else {
+        let base = state.words[12];
+        let ctrs = [ctr_row(state, base, 0), ctr_row(state, base, 1)];
+        state.advance(4);
+        let vs = rounds2(&v, &ctrs);
+        let [a0, b0, c0, d0] = vs[0];
+        _mm256_storeu_si256(
+            key_out.as_mut_ptr().cast(),
+            _mm256_permute2f128_si256::<0x20>(a0, b0),
+        );
+        let p = ks.as_mut_ptr().cast::<__m256i>();
+        // block 1 = quad 0 lane 1, blocks 2/3 = quad 1
+        _mm256_storeu_si256(p, _mm256_permute2f128_si256::<0x31>(a0, b0));
+        _mm256_storeu_si256(p.add(1), _mm256_permute2f128_si256::<0x31>(c0, d0));
+        let [a1, b1, c1, d1] = vs[1];
+        if ks.len() > BLOCK {
+            _mm256_storeu_si256(p.add(2), _mm256_permute2f128_si256::<0x20>(a1, b1));
+            _mm256_storeu_si256(p.add(3), _mm256_permute2f128_si256::<0x20>(c1, d1));
+        }
+        if ks.len() > 2 * BLOCK {
+            _mm256_storeu_si256(p.add(4), _mm256_permute2f128_si256::<0x31>(a1, b1));
+            _mm256_storeu_si256(p.add(5), _mm256_permute2f128_si256::<0x31>(c1, d1));
+        }
+    }
+}
+
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]

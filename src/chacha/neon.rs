@@ -257,6 +257,32 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
     xor_single(state, b1.as_mut_ptr());
 }
 
+/// Small-message fused op — same contract as the avx2 kernel's
+/// `gen_ks_small` (block 0's first 32 bytes → one-time key, raw message
+/// keystream blocks written to `ks`, one kernel call). Composed from the
+/// existing kernels: the 2..3-block case materializes 4 blocks into a
+/// zeroed scratch (the kernel's XOR thereby yields the raw keystream) and
+/// copies the requested prefix; the counter over-advances by up to 1 —
+/// harmless, the engine never reuses the state afterwards.
+#[inline(always)]
+pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
+    debug_assert!(ks.len() <= 3 * BLOCK && ks.len() % BLOCK == 0);
+    let mut blk0 = [0u8; BLOCK];
+    gen_block(state, &mut blk0);
+    key_out.copy_from_slice(&blk0[..32]);
+    state.advance(1);
+    let mut tmp = [0u8; 4 * BLOCK];
+    if ks.len() <= BLOCK {
+        xor_single(state, tmp.as_mut_ptr());
+        if !ks.is_empty() {
+            ks.copy_from_slice(&tmp[..BLOCK]);
+        }
+    } else {
+        xor_batch4(state, tmp.as_mut_ptr());
+        ks.copy_from_slice(&tmp[..ks.len()]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

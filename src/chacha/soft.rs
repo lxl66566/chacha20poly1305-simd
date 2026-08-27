@@ -65,6 +65,22 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
     }
 }
 
+/// Small-message fused op — same contract as the avx2 kernel's
+/// `gen_ks_small`.
+#[inline(always)]
+pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
+    debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
+    let mut blk = [0u8; BLOCK];
+    gen_block(state, &mut blk);
+    key_out.copy_from_slice(&blk[..32]);
+    state.advance(1);
+    for chunk in ks.chunks_mut(BLOCK) {
+        gen_block(state, &mut blk);
+        chunk.copy_from_slice(&blk);
+        state.advance(1);
+    }
+}
+
 /// XOR `buf` with the keystream starting at `state`'s counter, advancing one
 /// counter per 64-byte block.
 #[inline(always)]

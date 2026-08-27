@@ -43,6 +43,23 @@ fn load_le_words(src: &[u8], dst: &mut [u32]) {
     }
 }
 
+/// `dst ^= src` over equal-length slices, 8 bytes at a time so LLVM lowers
+/// it to wide loads/stores instead of byte ops. Shared by the AEAD engine
+/// and the small-message kernels' partial-block handling.
+#[inline(always)]
+pub(crate) fn xor_bytes(dst: &mut [u8], src: &[u8]) {
+    debug_assert_eq!(dst.len(), src.len());
+    let (chunks, tail) = dst.as_chunks_mut::<8>();
+    let (srcs, _) = src.as_chunks::<8>();
+    for (d, s) in chunks.iter_mut().zip(srcs) {
+        *d = (u64::from_le_bytes(*d) ^ u64::from_le_bytes(*s)).to_le_bytes();
+    }
+    let base = src.len() - tail.len();
+    for (i, d) in tail.iter_mut().enumerate() {
+        *d ^= src[base + i];
+    }
+}
+
 impl State {
     /// IETF ChaCha20 state with counter = 0.
     pub(crate) fn new_ietf(key: &[u8; 32], nonce: &[u8; 12]) -> Self {

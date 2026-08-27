@@ -232,6 +232,54 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
     }
 }
 
+/// Small-message fused op — same contract as the avx2 kernel's
+/// `gen_ks_small` (block 0's first 32 bytes → one-time key, raw message
+/// keystream blocks written to `ks`, one kernel call).
+#[inline(always)]
+pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
+    debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
+    let v = rows(state);
+    let base = state.words[12];
+    if ks.len() <= BLOCK {
+        let ctrs = [ctr_row(state, base, 0), ctr_row(state, base, 1)];
+        state.advance(if ks.is_empty() {
+            1
+        } else {
+            2
+        });
+        let [blk0, blk1] = rounds2(&v, &ctrs);
+        let k = key_out.as_mut_ptr().cast::<__m128i>();
+        _mm_storeu_si128(k, blk0[0]);
+        _mm_storeu_si128(k.add(1), blk0[1]);
+        if !ks.is_empty() {
+            let p = ks.as_mut_ptr().cast::<__m128i>();
+            for i in 0..4 {
+                _mm_storeu_si128(p.add(i), blk1[i]);
+            }
+        }
+    } else {
+        let ctrs = [
+            ctr_row(state, base, 0),
+            ctr_row(state, base, 1),
+            ctr_row(state, base, 2),
+            ctr_row(state, base, 3),
+        ];
+        state.advance(4);
+        let vs = rounds4(&v, &ctrs);
+        let k = key_out.as_mut_ptr().cast::<__m128i>();
+        _mm_storeu_si128(k, vs[0][0]);
+        _mm_storeu_si128(k.add(1), vs[0][1]);
+        let mut p = ks.as_mut_ptr();
+        for blk in &vs[1..] {
+            let q = p.cast::<__m128i>();
+            for i in 0..4 {
+                _mm_storeu_si128(q.add(i), blk[i]);
+            }
+            p = p.add(BLOCK);
+        }
+    }
+}
+
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]

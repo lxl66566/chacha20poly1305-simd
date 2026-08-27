@@ -35,6 +35,15 @@ pub(crate) trait Ops {
     /// XORed into `b1` (`b1.len() == BLOCK`; a zeroed buffer therefore
     /// yields the raw keystream). Advances the counter by 2.
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]);
+    /// Small-message fused op (the OpenSSL `chacha20_poly1305_tls_cipher`
+    /// shape, message ≤ 3 * BLOCK): ONE kernel call computes block 0 (first
+    /// 32 bytes → the one-time key in `key_out`) and the RAW keystream
+    /// blocks covering the message, written to `ks`
+    /// (`ks.len() == ceil(msg_len / BLOCK) * BLOCK`; 0 for an empty
+    /// message). Advances the counter by `1 + ks.len() / BLOCK`. The engine
+    /// XORs `ks` into the message at whichever pipeline stage the MAC
+    /// ordering requires.
+    unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]);
     /// XOR `buf` (any length) with the keystream, advancing the counter.
     /// Backends batch internally.
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]);
@@ -58,20 +67,84 @@ fn ct_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
     acc == 0
 }
 
-/// `dst ^= src` over equal-length slices, 8 bytes at a time so LLVM lowers
-/// it to wide loads/stores instead of byte ops.
+/// Largest message handled by the small-message fast path (the OpenSSL
+/// `chacha20_poly1305_tls_cipher` XOR128 threshold: 3 blocks).
+pub(crate) const SMALL_MAX: usize = 3 * BLOCK;
+
+/// Init the Poly1305 state from the one-time key (scrubbed afterwards when
+/// `zeroize` is on) and absorb the zero-padded AAD.
 #[inline(always)]
-fn xor_bytes(dst: &mut [u8], src: &[u8]) {
-    debug_assert_eq!(dst.len(), src.len());
-    let (chunks, tail) = dst.as_chunks_mut::<8>();
-    let (srcs, _) = src.as_chunks::<8>();
-    for (d, s) in chunks.iter_mut().zip(srcs) {
-        *d = (u64::from_le_bytes(*d) ^ u64::from_le_bytes(*s)).to_le_bytes();
+unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[u8]) -> Poly<B> {
+    let mut poly = Poly::<B>::new(key);
+    crate::poly1305::clear_key(key);
+    poly.update(aad);
+    let aad_pad = (16 - aad.len() % 16) % 16;
+    poly.update(&[0u8; 16][..aad_pad]);
+    poly
+}
+
+/// Small-path MAC sweep: absorb `data` (the ≤ [`SMALL_MAX`]-byte ciphertext)
+/// plus the trailing zero-pad and length block in one aligned pass — the
+/// engine-side mirror of OpenSSL's contiguous `tohash` region
+/// (`AAD‖CT‖pad‖len` assembled so one `Poly1305_Update` covers it). Brings
+/// the stream to a 64-byte boundary, drains `absorb4` windows over the
+/// message, then folds the assembled `[ct remainder ‖ zero pad][lengths]`
+/// tail as whole blocks.
+#[inline(always)]
+unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
+    poly: &mut Poly<B>,
+    data: &[u8],
+    aad_len: usize,
+) {
+    debug_assert!(data.len() <= SMALL_MAX);
+    let m = poly.pending_blocks();
+    let mut off = 0usize;
+    let s = (4 - m % 4) % 4 * 16;
+    // BUGFIX: skip the 64-byte alignment update when the message is shorter
+    // than the window remainder — clamping `s` to data.len() instead would
+    // park a partial block in the wrapper's pending buffer that the tail
+    // assembly below never zero-pads. No absorb4 window fits either way.
+    if data.len() >= s {
+        poly.update(&data[..s]);
+        off = s;
+        while data.len() - off >= BLOCK {
+            poly.absorb4(data[off..off + BLOCK].try_into().unwrap());
+            off += BLOCK;
+        }
     }
-    let base = src.len() - tail.len();
-    for (i, d) in tail.iter_mut().enumerate() {
-        *d ^= src[base + i];
+    while data.len() - off >= 16 {
+        poly.update(&data[off..off + 16]);
+        off += 16;
     }
+    // [ct remainder ‖ zero pad to 16] then [aad_len ‖ ct_len], at most two
+    // assembled blocks — no separate pad / length update calls needed.
+    let mut tail = [0u8; 32];
+    tail[16..24].copy_from_slice(&(aad_len as u64).to_le_bytes());
+    tail[24..32].copy_from_slice(&(data.len() as u64).to_le_bytes());
+    let rem = data.len() - off;
+    if rem > 0 {
+        tail[..rem].copy_from_slice(&data[off..]);
+        poly.update(&tail[..16]);
+    }
+    poly.update(&tail[16..32]);
+}
+
+/// Absorb the ciphertext zero-padding and the AAD/message lengths, then
+/// emit the tag (shared by every path's epilogue).
+#[inline(always)]
+unsafe fn finish_tag<B: crate::poly1305::Backend>(
+    poly: &mut Poly<B>,
+    aad_len: usize,
+    ct_len: usize,
+    out: &mut [u8; 16],
+) {
+    let ct_pad = (16 - ct_len % 16) % 16;
+    poly.update(&[0u8; 16][..ct_pad]);
+    let mut lengths = [0u8; 16];
+    lengths[..8].copy_from_slice(&(aad_len as u64).to_le_bytes());
+    lengths[8..].copy_from_slice(&(ct_len as u64).to_le_bytes());
+    poly.update(&lengths);
+    poly.finalize_into(out);
 }
 
 /// Fused seal (encrypt + MAC). Writes the tag into `tag_out`.
@@ -117,30 +190,67 @@ unsafe fn process<O: Ops, const SEAL: bool>(
     // SAFETY: callers (seal/open) received target-feature guarantees from the
     // backend entry points.
     unsafe {
-        // ── Blocks 0 + 1 in ONE kernel call ──
+        // ── Tiny-message path (≤ 1 block): quad key gen + plain updates ──
+        // Structurally the pre-fusion tiny branch: the sweep machinery of
+        // the small path measurably hurts sub-block sizes (code layout
+        // around the rounds loop), so keep the minimal shape. Measured
+        // boundary: 64 bytes is also faster here than in the sweep path.
+        if msg.len() <= BLOCK {
+            let mut key32 = [0u8; 32];
+            let mut ks1 = [0u8; BLOCK];
+            O::gen_key_xor2(state, &mut key32, &mut ks1);
+            let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
+            if !SEAL {
+                poly.update(msg);
+            }
+            crate::chacha::xor_bytes(msg, &ks1[..msg.len()]);
+            if SEAL {
+                poly.update(msg);
+            }
+            finish_tag(&mut poly, aad.len(), msg.len(), tag_out);
+            return;
+        }
+
+        // ── Small-message fast path (1..=3 blocks) ──
+        // OpenSSL's `chacha20_poly1305_tls_cipher` shape: ONE kernel call
+        // covers the one-time key AND the whole message; the MAC then runs
+        // as a single sweep over the contiguous message buffer (mac_small_sweep).
+        if msg.len() <= SMALL_MAX {
+            let mut key32 = [0u8; 32];
+            let mut ks = [0u8; SMALL_MAX];
+            let n = msg.len().div_ceil(BLOCK) * BLOCK;
+            O::gen_ks_small(state, &mut key32, &mut ks[..n]);
+            let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
+            // The xor lands on whichever side of the MAC sweep the pipeline
+            // stage requires: seal MACs the produced ciphertext (xor first),
+            // open MACs the received ciphertext (xor after).
+            if SEAL {
+                crate::chacha::xor_bytes(msg, &ks[..msg.len()]);
+                mac_small_sweep(&mut poly, msg, aad.len());
+            } else {
+                mac_small_sweep(&mut poly, msg, aad.len());
+                crate::chacha::xor_bytes(msg, &ks[..msg.len()]);
+            }
+            poly.finalize_into(tag_out);
+            return;
+        }
+
+        // ── Blocks 0 + 1 in ONE kernel call (bulk prologue) ──
         // Block 0's first 32 bytes are the Poly1305 one-time key, block 1 is
         // the first message keystream. A single quad serves both (the old
         // shape computed 3 blocks to use 2: one 2-block call for the key
         // discarding block 1, then a separate call for the message).
-        // Seal XORs block 1 straight into the message when it is long
-        // enough; otherwise (short seals, all opens) the keystream parks in
-        // `ks1` — the MAC must read pristine ciphertext before the XOR
-        // destroys it, so open applies it only after absorbing msg[..BLOCK].
+        // Seal XORs block 1 straight into the message; open parks the
+        // keystream in `ks1` — the MAC must read pristine ciphertext before
+        // the XOR destroys it, so it is applied after absorbing msg[..BLOCK].
         let mut key32 = [0u8; 32];
         let mut ks1 = [0u8; BLOCK];
-        let fused_into_msg = SEAL && msg.len() >= BLOCK;
-        if fused_into_msg {
+        if SEAL {
             O::gen_key_xor2(state, &mut key32, &mut msg[..BLOCK]);
         } else {
             O::gen_key_xor2(state, &mut key32, &mut ks1);
         }
-        let mut poly = Poly::<O::Poly>::new(&key32);
-        crate::poly1305::clear_key(&mut key32);
-
-        // ── MAC the (zero-padded) AAD ──
-        poly.update(aad);
-        let aad_pad = (16 - aad.len() % 16) % 16;
-        poly.update(&[0u8; 16][..aad_pad]);
+        let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
 
         // ── MAC/keystream interleave ──
         // The Poly1305 stream (AAD zero-padded) is generally NOT aligned with the
@@ -158,107 +268,80 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         let mut off;
         let mut poly_off;
 
-        if msg.len() < BLOCK + s {
-            // No bulk loop will run: finish the whole partial-block message
-            // through the generic path. Block 1's keystream is already in
-            // hand (xored into msg by the fused call for long seals, parked
-            // in `ks1` otherwise).
-            if !SEAL {
-                poly.update(msg);
-            }
-            if !fused_into_msg {
-                let n = msg.len().min(BLOCK);
-                xor_bytes(&mut msg[..n], &ks1[..n]);
-            }
-            if msg.len() > BLOCK {
-                O::chacha_xor(state, &mut msg[BLOCK..]);
-            }
+        // (msg.len() > SMALL_MAX ≥ BLOCK + s always holds: no tiny branch.)
+        // Prologue: the poly alignment window. Block 1 was consumed by
+        // the fused call above; when s > 0 the first 4-block window
+        // straddles blocks 1 and 2.
+        if SEAL {
+            // (block 1 was xored into msg by the fused call)
+            poly.update(&msg[..s]);
+            poly_off = s;
+        } else {
+            poly.update(&msg[..s]);
+            poly.absorb4(msg[s..s + BLOCK].try_into().unwrap());
+            crate::chacha::xor_bytes(&mut msg[..BLOCK], &ks1);
+            poly_off = s + BLOCK;
+        }
+        off = BLOCK;
+        // Fused bulk loop.
+        let batch = O::CHACHA_BATCH * BLOCK;
+        while msg.len() - off >= batch {
             if SEAL {
-                poly.update(msg);
+                O::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                off += batch;
+                while poly_off + BLOCK <= off {
+                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
+                    poly_off += BLOCK;
+                }
+            } else {
+                // Open: poly must lead the xor cursor — every window it
+                // absorbs must still be unmodified ciphertext. Poly
+                // windows sit on an `s`-shifted grid that never aligns
+                // with the ChaCha 64-byte grid (s ≠ 0), so the xor cursor
+                // only ever advances up to the largest 64-byte boundary
+                // the poly has already absorbed past.
+                let ahead = (off + 2 * batch).min(msg.len());
+                while poly_off + BLOCK <= ahead {
+                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
+                    poly_off += BLOCK;
+                }
+                let xor_end = (off + batch).min(poly_off & !(BLOCK - 1));
+                if xor_end <= off {
+                    // Defense in depth: unreachable while the loop
+                    // condition holds (poly then leads the xor cursor by
+                    // more than `batch` bytes), but if the invariant ever
+                    // breaks the tail still finishes the message
+                    // correctly.
+                    break;
+                }
+                if xor_end - off == batch {
+                    O::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                } else {
+                    O::chacha_xor(state, &mut msg[off..xor_end]);
+                }
+                off = xor_end;
+            }
+        }
+
+        // Tail: xor / absorb the remainder (may be up to batch-1 bytes).
+        if off < msg.len() {
+            if SEAL {
+                O::chacha_xor(state, &mut msg[off..]);
+            }
+            poly.update(&msg[poly_off..]);
+            if !SEAL {
+                O::chacha_xor(state, &mut msg[off..]);
             }
             off = msg.len();
             poly_off = msg.len();
-        } else {
-            // Prologue: the poly alignment window. Block 1 was consumed by
-            // the fused call above; when s > 0 the first 4-block window
-            // straddles blocks 1 and 2.
-            if SEAL {
-                // (block 1 was xored into msg by the fused call)
-                poly.update(&msg[..s]);
-                poly_off = s;
-            } else {
-                poly.update(&msg[..s]);
-                poly.absorb4(msg[s..s + BLOCK].try_into().unwrap());
-                xor_bytes(&mut msg[..BLOCK], &ks1);
-                poly_off = s + BLOCK;
-            }
-            off = BLOCK;
-            // Fused bulk loop.
-            let batch = O::CHACHA_BATCH * BLOCK;
-            while msg.len() - off >= batch {
-                if SEAL {
-                    O::chacha_xor_batch(state, &mut msg[off..off + batch]);
-                    off += batch;
-                    while poly_off + BLOCK <= off {
-                        poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                        poly_off += BLOCK;
-                    }
-                } else {
-                    // Open: poly must lead the xor cursor — every window it
-                    // absorbs must still be unmodified ciphertext. Poly
-                    // windows sit on an `s`-shifted grid that never aligns
-                    // with the ChaCha 64-byte grid (s ≠ 0), so the xor cursor
-                    // only ever advances up to the largest 64-byte boundary
-                    // the poly has already absorbed past.
-                    let ahead = (off + 2 * batch).min(msg.len());
-                    while poly_off + BLOCK <= ahead {
-                        poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                        poly_off += BLOCK;
-                    }
-                    let xor_end = (off + batch).min(poly_off & !(BLOCK - 1));
-                    if xor_end <= off {
-                        // Defense in depth: unreachable while the loop
-                        // condition holds (poly then leads the xor cursor by
-                        // more than `batch` bytes), but if the invariant ever
-                        // breaks the tail still finishes the message
-                        // correctly.
-                        break;
-                    }
-                    if xor_end - off == batch {
-                        O::chacha_xor_batch(state, &mut msg[off..off + batch]);
-                    } else {
-                        O::chacha_xor(state, &mut msg[off..xor_end]);
-                    }
-                    off = xor_end;
-                }
-            }
-
-            // Tail: xor / absorb the remainder (may be up to batch-1 bytes).
-            if off < msg.len() {
-                if SEAL {
-                    O::chacha_xor(state, &mut msg[off..]);
-                }
-                poly.update(&msg[poly_off..]);
-                if !SEAL {
-                    O::chacha_xor(state, &mut msg[off..]);
-                }
-                off = msg.len();
-                poly_off = msg.len();
-            } else if poly_off < msg.len() {
-                poly.update(&msg[poly_off..]);
-                poly_off = msg.len();
-            }
+        } else if poly_off < msg.len() {
+            poly.update(&msg[poly_off..]);
+            poly_off = msg.len();
         }
         debug_assert_eq!(off, msg.len());
         debug_assert_eq!(poly_off, msg.len());
 
         // ── Zero-pad the ciphertext, absorb lengths, emit tag ──
-        let ct_pad = (16 - msg.len() % 16) % 16;
-        poly.update(&[0u8; 16][..ct_pad]);
-        let mut lengths = [0u8; 16];
-        lengths[..8].copy_from_slice(&(aad.len() as u64).to_le_bytes());
-        lengths[8..].copy_from_slice(&(msg.len() as u64).to_le_bytes());
-        poly.update(&lengths);
-        poly.finalize_into(tag_out);
+        finish_tag(&mut poly, aad.len(), msg.len(), tag_out);
     }
 }

@@ -20,6 +20,11 @@ impl Ops for Avx512Ops {
     }
 
     #[inline(always)]
+    unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
+        crate::chacha::avx512::gen_ks_small(state, key_out, ks);
+    }
+
+    #[inline(always)]
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]) {
         let mut off = 0usize;
         while buf.len() - off >= 512 {
