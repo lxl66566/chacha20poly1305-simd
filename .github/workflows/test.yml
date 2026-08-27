@@ -28,5 +28,7 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: cargo check (avx512 disabled)
+        run: cargo check --no-default-features --features std
       - name: cargo test
         run: cargo nextest run --all-features --locked --no-tests pass && cargo test --all-features --locked --doc

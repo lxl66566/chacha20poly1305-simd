@@ -16,7 +16,19 @@
 //! - Backends are runtime-dispatched and cached in a single atomic load; they can also be pinned at
 //!   compile time the RustCrypto way — `RUSTFLAGS='--cfg chacha20poly1305_backend="avx2"
 //!   -Ctarget-feature=+avx2'` — which compiles exactly one backend, removes the rest from the
-//!   binary and resolves dispatch to a compile-time constant.
+//!   binary and resolves dispatch to a compile-time constant. The AVX-512 tier sits behind the
+//!   default-on [`avx512`](crate#features) feature; disable it with `default-features = false` to
+//!   keep AVX-512 instructions out of the binary (dispatch then stops at AVX2).
+//!
+//! # Features
+//!
+//! | feature   | default | description                                                      |
+//! | --------- | ------- | ---------------------------------------------------------------- |
+//! | `std`     | ✓       | runtime CPU detection (otherwise compile-time `target_feature`s) |
+//! | `alloc`   | ✓       | allocating API                                                   |
+//! | `avx512`  | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
+//! | `zeroize` | –       | zeroize keys and intermediate secrets on drop                    |
+//! | `hotpath` | –       | [hotpath](https://crates.io/crates/hotpath) probes               |
 //!
 //! # Usage
 //!

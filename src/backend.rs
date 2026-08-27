@@ -2,9 +2,10 @@
 //!
 //! Two modes (cfg aliases are computed and validated by `build.rs`):
 //!
-//! - *auto* (default): every backend reachable on the target arch is compiled; `std` builds probe
-//!   the CPU once and cache the result in a single `AtomicU8` (steady state: one relaxed load per
-//!   AEAD call), `no_std` builds fall back to compile-time `target_feature`s.
+//! - *auto* (default): every backend reachable on the target arch is compiled (the AVX-512 tier
+//!   additionally needs the default-on `avx512` feature); `std` builds probe the CPU once and cache
+//!   the result in a single `AtomicU8` (steady state: one relaxed load per AEAD call), `no_std`
+//!   builds fall back to compile-time `target_feature`s.
 //! - *forced*: `RUSTFLAGS='--cfg chacha20poly1305_backend="<name>"'` compiles exactly one backend —
 //!   the other SIMD kernels are removed from the binary and dispatch resolves to a compile-time
 //!   constant with zero probing (RustCrypto-style contract; `build.rs` rejects arch /
@@ -78,14 +79,16 @@ static KIND: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0)
 #[cfg(not(force_backend))]
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 fn detect() -> Kind {
+    #[cfg(backend_avx512)]
     if std::arch::is_x86_feature_detected!("avx512f")
         && std::arch::is_x86_feature_detected!("avx512vl")
         // The AVX-512 entry points enable `avx2` in `target_feature`; detect it
         // explicitly instead of relying on "all AVX-512 CPUs have AVX2".
         && std::arch::is_x86_feature_detected!("avx2")
     {
-        Kind::Avx512
-    } else if std::arch::is_x86_feature_detected!("avx2") {
+        return Kind::Avx512;
+    }
+    if std::arch::is_x86_feature_detected!("avx2") {
         Kind::Avx2
     } else {
         // SSE2 is part of the x86-64 baseline ISA: always present.
@@ -111,6 +114,7 @@ fn detect() -> Kind {
     // may only run on CPUs with those features, so this stays sound.
     #[cfg(target_arch = "x86_64")]
     {
+        #[cfg(backend_avx512)]
         if cfg!(target_feature = "avx512f")
             && cfg!(target_feature = "avx512vl")
             && cfg!(target_feature = "avx2")
@@ -146,6 +150,7 @@ fn kind_from_u8(k: u8) -> Kind {
     #[cfg(target_arch = "x86_64")]
     match k {
         1 => return Kind::Avx2,
+        #[cfg(backend_avx512)]
         2 => return Kind::Avx512,
         5 => return Kind::Sse2,
         _ => {},

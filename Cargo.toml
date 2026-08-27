@@ -31,9 +31,11 @@ criterion  = "0.8"
 rustcrypto = { package = "chacha20poly1305", version = "0.11" }
 
 [features]
-default = ["alloc", "std"]
+default = ["alloc", "avx512", "std"]
 alloc   = []
-# Requires std (the recorder lives in-process).
+# Compile the x86-64 AVX-512 backend. Disable via `default-features = false` to
+# keep AVX-512 instructions out of the binary.
+avx512  = []
 hotpath = ["dep:hotpath", "hotpath/hotpath", "std"]
 std     = ["alloc"]
 # Zeroize secret key material (cipher key, Poly1305 key/state) on drop.

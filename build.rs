@@ -15,6 +15,8 @@
 //!
 //! Without the cfg, every backend available for the target arch is compiled
 //! and selected at runtime (`std`) or via `target_feature` (`no_std`).
+//!
+//! The AVX-512 backend additionally requires the (default-on) `avx512` crate feature.
 
 use std::{env, process};
 
@@ -42,6 +44,7 @@ fn main() {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
     let features: Vec<&str> = target_features.split(',').collect();
+    let avx512_feature = env::var_os("CARGO_FEATURE_AVX512").is_some();
 
     // Declare every cfg we emit or read so `unexpected_cfgs` stays quiet.
     for &(name, ..) in BACKENDS {
@@ -72,6 +75,12 @@ fn main() {
                         "invalid chacha20poly1305_backend {name:?} ({VALID})"
                     ))
                 });
+        if name == "avx512" && !avx512_feature {
+            fail(
+                "forced backend \"avx512\" requires the `avx512` crate feature (enabled by \
+                 default)",
+            );
+        }
         if !want_arch.is_empty() && *want_arch != arch {
             fail(&format!(
                 "forced backend {name:?} requires target arch {want_arch} (current: {arch})"
@@ -98,8 +107,11 @@ fn main() {
         let on = match &forced {
             // Forced: exactly the requested backend.
             Some(b) => b == name,
-            // Auto: every backend reachable on this target arch.
-            None => want_arch.is_empty() || want_arch == arch,
+            // Auto: every backend reachable on this target arch; the AVX-512
+            // kernels are additionally gated behind the `avx512` feature.
+            None => {
+                (want_arch.is_empty() || want_arch == arch) && (name != "avx512" || avx512_feature)
+            },
         };
         if on {
             println!("cargo:rustc-cfg=backend_{name}");

@@ -2,7 +2,7 @@
 
 Pure Rust implementation of [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc8439) (RFC 8439) and XChaCha20-Poly1305 AEAD, with hand-written SIMD for x86_64 / aarch64:
 
-- AVX-512 / AVX2 / SSE2 / NEON / scalar backends, runtime-detected
+- AVX-512 / AVX2 / SSE2 / NEON / scalar backends, runtime-detected (AVX-512 is default-on and can be disabled)
 - `no_std` compatible, optional `zeroize`
 
 > [!NOTE]
@@ -43,6 +43,7 @@ assert_eq!(cipher.decrypt(&nonce, b"header", &ct).unwrap(), b"secret payload");
 
 | feature   | default | description                                        |
 | --------- | ------- | -------------------------------------------------- |
+| `avx512`  | ✓       | x86-64 AVX-512 backend                             |
 | `std`     | ✓       | runtime CPU detection (otherwise scalar backend)   |
 | `alloc`   | ✓       | allocating API                                     |
 | `zeroize` | –       | zeroize keys and intermediate secrets on drop      |
@@ -50,7 +51,7 @@ assert_eq!(cipher.decrypt(&nonce, b"header", &ct).unwrap(), b"secret payload");
 
 ## Backend selection
 
-Runtime detection is the default (x86-64: avx512 → avx2 → sse2; aarch64: neon). A backend can also be forced at compile time via RUSTFLAGS (forcing a SIMD backend is a promise that the target CPU supports that instruction set; other backend kernels are no longer compiled into the binary):
+Runtime detection is the default (x86-64: avx512 (feature needed) → avx2 → sse2; aarch64: neon). A backend can also be forced at compile time via RUSTFLAGS (forcing a SIMD backend is a promise that the target CPU supports that instruction set; other backend kernels are no longer compiled into the binary):
 
 ```sh
 RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo build --release
