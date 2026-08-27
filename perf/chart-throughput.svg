@@ -1,21 +1,21 @@
 <svg xmlns='http://www.w3.org/2000/svg' width='960' height='560' viewBox='0 0 960 560'>
 <rect width='960' height='560' fill='white'/>
-<line x1='78' y1='454.5' x2='944' y2='454.5' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='458.5' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>32 MiB/s</text>
-<line x1='78' y1='403.4' x2='944' y2='403.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='407.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>64 MiB/s</text>
-<line x1='78' y1='352.4' x2='944' y2='352.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='356.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>128 MiB/s</text>
-<line x1='78' y1='301.4' x2='944' y2='301.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='305.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>256 MiB/s</text>
-<line x1='78' y1='250.4' x2='944' y2='250.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='254.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>512 MiB/s</text>
-<line x1='78' y1='199.4' x2='944' y2='199.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='203.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>1 GiB/s</text>
-<line x1='78' y1='148.4' x2='944' y2='148.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='152.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>2 GiB/s</text>
-<line x1='78' y1='97.4' x2='944' y2='97.4' stroke='#e3e3e3' stroke-width='1'/>
-<text x='70.0' y='101.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>4 GiB/s</text>
+<line x1='78' y1='454.4' x2='944' y2='454.4' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='458.4' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>32 MiB/s</text>
+<line x1='78' y1='403.5' x2='944' y2='403.5' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='407.5' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>64 MiB/s</text>
+<line x1='78' y1='352.5' x2='944' y2='352.5' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='356.5' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>128 MiB/s</text>
+<line x1='78' y1='301.6' x2='944' y2='301.6' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='305.6' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>256 MiB/s</text>
+<line x1='78' y1='250.7' x2='944' y2='250.7' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='254.7' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>512 MiB/s</text>
+<line x1='78' y1='199.8' x2='944' y2='199.8' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='203.8' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>1 GiB/s</text>
+<line x1='78' y1='148.9' x2='944' y2='148.9' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='152.9' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>2 GiB/s</text>
+<line x1='78' y1='97.9' x2='944' y2='97.9' stroke='#e3e3e3' stroke-width='1'/>
+<text x='70.0' y='101.9' font-size='11' text-anchor='end' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>4 GiB/s</text>
 <line x1='78.0' y1='40' x2='78.0' y2='508' stroke='#efefef' stroke-width='1'/>
 <text x='78.0' y='526.0' font-size='11' text-anchor='middle' fill='#555' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>16 B</text>
 <line x1='129.6' y1='40' x2='129.6' y2='508' stroke='#efefef' stroke-width='1'/>
@@ -43,75 +43,75 @@
 <rect x='78' y='40' width='866' height='468' fill='none' stroke='#bbb'/>
 <text x='511.0' y='552.0' font-size='12' text-anchor='middle' fill='#444' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>message size</text>
 <text x='18.0' y='274.0' font-size='12' text-anchor='middle' fill='#444' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif' transform='rotate(-90 18 274.0)'>throughput (seal, in-place)</text>
-<polyline points='78.0,464.9 129.6,418.3 186.2,368.2 240.4,345.7 294.5,330.1 348.6,320.7 402.8,316.4 511.0,311.7 619.2,310.9 727.5,310.6 835.8,311.0 944.0,311.3' fill='none' stroke='#1f77b4' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
-<polyline points='78.0,453.2 129.6,406.7 186.2,356.7 240.4,331.7 294.5,278.5 348.6,261.2 402.8,251.1 511.0,242.1 619.2,239.5 727.5,238.8 835.8,238.3 944.0,238.5' fill='none' stroke='#2ca02c' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
-<polyline points='78.0,476.3 129.6,430.3 186.2,377.7 240.4,350.5 294.5,291.4 348.6,270.4 402.8,257.2 511.0,245.7 619.2,241.7 727.5,241.3 835.8,241.3 944.0,240.6' fill='none' stroke='#ff7f0e' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
-<polyline points='78.0,432.7 129.6,387.8 186.2,335.8 240.4,292.7 294.5,258.6 348.6,247.3 402.8,228.1 511.0,216.6 619.2,213.2 727.5,212.4 835.8,212.3 944.0,212.2' fill='none' stroke='#d62728' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
-<polyline points='78.0,441.9 129.6,395.3 186.2,341.1 240.4,292.9 294.5,243.7 348.6,205.9 402.8,157.4 511.0,107.9 619.2,88.2 727.5,81.5 835.8,79.8 944.0,79.7' fill='none' stroke='#9467bd' stroke-width='2.6' stroke-dasharray='10 4 2 4' opacity='1.0'/>
-<circle cx='78.0' cy='441.9' r='2.6' fill='#9467bd' opacity='1.0'/>
+<polyline points='78.0,468.4 129.6,419.5 186.2,371.4 240.4,346.8 294.5,331.0 348.6,321.9 402.8,316.2 511.0,312.8 619.2,312.4 727.5,311.2 835.8,312.3 944.0,312.3' fill='none' stroke='#1f77b4' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
+<polyline points='78.0,454.3 129.6,408.6 186.2,358.0 240.4,333.3 294.5,279.2 348.6,263.2 402.8,252.4 511.0,242.5 619.2,240.7 727.5,239.4 835.8,239.6 944.0,239.3' fill='none' stroke='#2ca02c' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
+<polyline points='78.0,476.3 129.6,430.1 186.2,378.2 240.4,350.9 294.5,292.2 348.6,271.0 402.8,258.2 511.0,246.7 619.2,242.9 727.5,241.7 835.8,242.2 944.0,242.0' fill='none' stroke='#ff7f0e' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
+<polyline points='78.0,432.0 129.6,388.2 186.2,335.7 240.4,293.3 294.5,256.5 348.6,247.6 402.8,228.9 511.0,217.0 619.2,214.2 727.5,213.3 835.8,212.7 944.0,213.0' fill='none' stroke='#d62728' stroke-width='1.8' stroke-dasharray='6 4' opacity='0.55'/>
+<polyline points='78.0,440.9 129.6,395.3 186.2,340.9 240.4,292.3 294.5,243.6 348.6,205.8 402.8,157.9 511.0,107.9 619.2,87.5 727.5,81.7 835.8,79.7 944.0,80.0' fill='none' stroke='#9467bd' stroke-width='2.6' stroke-dasharray='10 4 2 4' opacity='1.0'/>
+<circle cx='78.0' cy='440.9' r='2.6' fill='#9467bd' opacity='1.0'/>
 <circle cx='129.6' cy='395.3' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='186.2' cy='341.1' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='240.4' cy='292.9' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='294.5' cy='243.7' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='348.6' cy='205.9' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='402.8' cy='157.4' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='186.2' cy='340.9' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='240.4' cy='292.3' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='294.5' cy='243.6' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='348.6' cy='205.8' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='402.8' cy='157.9' r='2.6' fill='#9467bd' opacity='1.0'/>
 <circle cx='511.0' cy='107.9' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='619.2' cy='88.2' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='727.5' cy='81.5' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='835.8' cy='79.8' r='2.6' fill='#9467bd' opacity='1.0'/>
-<circle cx='944.0' cy='79.7' r='2.6' fill='#9467bd' opacity='1.0'/>
-<polyline points='78.0,411.7 129.6,367.8 186.2,316.9 240.4,288.5 294.5,281.7 348.6,272.9 402.8,266.7 511.0,263.8 619.2,262.9 727.5,263.3 835.8,263.2 944.0,264.1' fill='none' stroke='#1f77b4' stroke-width='2.4' opacity='1.0'/>
-<circle cx='78.0' cy='411.7' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='129.6' cy='367.8' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='186.2' cy='316.9' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='240.4' cy='288.5' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='294.5' cy='281.7' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='348.6' cy='272.9' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='402.8' cy='266.7' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='511.0' cy='263.8' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='619.2' cy='262.9' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='727.5' cy='263.3' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='835.8' cy='263.2' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<circle cx='944.0' cy='264.1' r='2.6' fill='#1f77b4' opacity='1.0'/>
-<polyline points='78.0,368.8 129.6,327.2 186.2,275.6 240.4,252.4 294.5,234.9 348.6,219.6 402.8,210.7 511.0,203.5 619.2,201.7 727.5,200.9 835.8,200.9 944.0,200.6' fill='none' stroke='#2ca02c' stroke-width='2.4' opacity='1.0'/>
-<circle cx='78.0' cy='368.8' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='619.2' cy='87.5' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='727.5' cy='81.7' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='835.8' cy='79.7' r='2.6' fill='#9467bd' opacity='1.0'/>
+<circle cx='944.0' cy='80.0' r='2.6' fill='#9467bd' opacity='1.0'/>
+<polyline points='78.0,415.5 129.6,369.5 186.2,318.0 240.4,290.5 294.5,283.7 348.6,274.1 402.8,270.7 511.0,267.6 619.2,265.1 727.5,264.8 835.8,267.2 944.0,265.9' fill='none' stroke='#1f77b4' stroke-width='2.4' opacity='1.0'/>
+<circle cx='78.0' cy='415.5' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='129.6' cy='369.5' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='186.2' cy='318.0' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='240.4' cy='290.5' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='294.5' cy='283.7' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='348.6' cy='274.1' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='402.8' cy='270.7' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='511.0' cy='267.6' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='619.2' cy='265.1' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='727.5' cy='264.8' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='835.8' cy='267.2' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<circle cx='944.0' cy='265.9' r='2.6' fill='#1f77b4' opacity='1.0'/>
+<polyline points='78.0,368.2 129.6,327.2 186.2,275.1 240.4,253.1 294.5,234.9 348.6,219.9 402.8,209.8 511.0,201.1 619.2,198.9 727.5,198.1 835.8,198.4 944.0,198.3' fill='none' stroke='#2ca02c' stroke-width='2.4' opacity='1.0'/>
+<circle cx='78.0' cy='368.2' r='2.6' fill='#2ca02c' opacity='1.0'/>
 <circle cx='129.6' cy='327.2' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='186.2' cy='275.6' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='240.4' cy='252.4' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='186.2' cy='275.1' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='240.4' cy='253.1' r='2.6' fill='#2ca02c' opacity='1.0'/>
 <circle cx='294.5' cy='234.9' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='348.6' cy='219.6' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='402.8' cy='210.7' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='511.0' cy='203.5' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='619.2' cy='201.7' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='727.5' cy='200.9' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='835.8' cy='200.9' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<circle cx='944.0' cy='200.6' r='2.6' fill='#2ca02c' opacity='1.0'/>
-<polyline points='78.0,373.4 129.6,327.0 186.2,277.9 240.4,234.8 294.5,223.5 348.6,198.6 402.8,174.9 511.0,145.3 619.2,135.7 727.5,133.1 835.8,132.3 944.0,132.5' fill='none' stroke='#ff7f0e' stroke-width='2.4' opacity='1.0'/>
-<circle cx='78.0' cy='373.4' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='129.6' cy='327.0' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='186.2' cy='277.9' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='240.4' cy='234.8' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='294.5' cy='223.5' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='348.6' cy='198.6' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='402.8' cy='174.9' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='511.0' cy='145.3' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='619.2' cy='135.7' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='727.5' cy='133.1' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='835.8' cy='132.3' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<circle cx='944.0' cy='132.5' r='2.6' fill='#ff7f0e' opacity='1.0'/>
-<polyline points='78.0,371.6 129.6,326.3 186.2,278.1 240.4,231.1 294.5,221.7 348.6,196.7 402.8,169.7 511.0,135.7 619.2,123.7 727.5,120.5 835.8,119.5 944.0,119.5' fill='none' stroke='#d62728' stroke-width='2.4' opacity='1.0'/>
-<circle cx='78.0' cy='371.6' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='129.6' cy='326.3' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='186.2' cy='278.1' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='348.6' cy='219.9' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='402.8' cy='209.8' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='511.0' cy='201.1' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='619.2' cy='198.9' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='727.5' cy='198.1' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='835.8' cy='198.4' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<circle cx='944.0' cy='198.3' r='2.6' fill='#2ca02c' opacity='1.0'/>
+<polyline points='78.0,372.8 129.6,326.3 186.2,278.8 240.4,234.1 294.5,223.3 348.6,198.7 402.8,175.9 511.0,144.5 619.2,134.4 727.5,131.7 835.8,130.8 944.0,130.7' fill='none' stroke='#ff7f0e' stroke-width='2.4' opacity='1.0'/>
+<circle cx='78.0' cy='372.8' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='129.6' cy='326.3' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='186.2' cy='278.8' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='240.4' cy='234.1' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='294.5' cy='223.3' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='348.6' cy='198.7' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='402.8' cy='175.9' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='511.0' cy='144.5' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='619.2' cy='134.4' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='727.5' cy='131.7' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='835.8' cy='130.8' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<circle cx='944.0' cy='130.7' r='2.6' fill='#ff7f0e' opacity='1.0'/>
+<polyline points='78.0,370.8 129.6,326.0 186.2,278.2 240.4,231.1 294.5,222.6 348.6,196.2 402.8,175.2 511.0,129.6 619.2,110.3 727.5,104.0 835.8,102.6 944.0,102.3' fill='none' stroke='#d62728' stroke-width='2.4' opacity='1.0'/>
+<circle cx='78.0' cy='370.8' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='129.6' cy='326.0' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='186.2' cy='278.2' r='2.6' fill='#d62728' opacity='1.0'/>
 <circle cx='240.4' cy='231.1' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='294.5' cy='221.7' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='348.6' cy='196.7' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='402.8' cy='169.7' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='511.0' cy='135.7' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='619.2' cy='123.7' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='727.5' cy='120.5' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='835.8' cy='119.5' r='2.6' fill='#d62728' opacity='1.0'/>
-<circle cx='944.0' cy='119.5' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='294.5' cy='222.6' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='348.6' cy='196.2' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='402.8' cy='175.2' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='511.0' cy='129.6' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='619.2' cy='110.3' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='727.5' cy='104.0' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='835.8' cy='102.6' r='2.6' fill='#d62728' opacity='1.0'/>
+<circle cx='944.0' cy='102.3' r='2.6' fill='#d62728' opacity='1.0'/>
 <text x='84.0' y='28.0' font-size='13' text-anchor='start' fill='#222' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>ChaCha20-Poly1305 seal throughput — this crate (solid) vs RustCrypto (dashed, same ISA tier) vs OpenSSL 4.1-dev (dash-dot, auto-dispatch)</text>
 <rect x='84' y='42' width='300' height='132' fill='white' stroke='#ccc' opacity='0.92'/>
 <line x1='92' y1='52' x2='120' y2='52' stroke='#1f77b4' stroke-width='2.4'/>

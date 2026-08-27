@@ -67,7 +67,7 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 ## Performance
 
-> Test environment: AMD Ryzen 9 7945HX (Zen 4) · Linux · rustc 1.100-nightly  
+> Test environment: AMD Ryzen 9 7950X (Zen 4) · Linux · rustc 1.100-nightly  
 > Workload: AEAD **seal** (`encrypt_in_place_detached`, 16-byte AAD, in-place), throughput = msg / wall time.  
 > Contenders: RustCrypto `chacha20poly1305` 0.11 (`cargo bench --bench aead`, same ISA tier) and OpenSSL 4.1.0-dev (static build, `EVP_chacha20_poly1305`, runtime auto-dispatch — on this CPU: AVX-512 ChaCha + AVX-512 IFMA Poly1305; bench driver: [`perf/openssl_bench.c`](perf/openssl_bench.c)).
 
@@ -79,9 +79,9 @@ Highlights:
 
 |                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                     |
 | ------------------- | ----------------------------- | --------------------------------------------- |
-| tiny (16–256 B)     | 2.0–4.8×                      | 2.3–2.6× faster (fused prologue pays off)     |
-| mid (512 B – 1 KiB) | 1.7–3.1×                      | ~parity (0.85–1.13×)                          |
-| large (≥ 4 KiB)     | 1.7–4.4× (AVX2 64 KiB: 4.4×)  | OpenSSL ahead (1 MiB: 5.1 GiB/s vs 3.0 GiB/s) |
+| tiny (16–256 B)     | 1.6–4.9×                      | 1.3–2.6× faster (fused prologue pays off)     |
+| mid (512 B – 1 KiB) | 1.8–3.1×                      | ~parity (0.8–1.1×)                            |
+| large (≥ 4 KiB)     | 1.7–4.6× (AVX2 64 KiB: 4.5×)  | OpenSSL ahead (1 MiB: 5.1 GiB/s vs 3.8 GiB/s) |
 
 ### AArch64
 
