@@ -73,15 +73,15 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 The table below lists this implementation's throughput and the speedup over RustCrypto in the same configuration:
 
-| message | Scalar (soft) | speedup |       SSE2 | speedup |       AVX2 | speedup |    AVX-512 | speedup |
-| ------: | ------------: | :-----: | ---------: | :-----: | ---------: | :-----: | ---------: | :-----: |
-|    16 B |      58 MiB/s |  2.1×   |   68 MiB/s |  2.1×   |   61 MiB/s |  2.6×   |   56 MiB/s |  1.3×   |
-|    64 B |     214 MiB/s |  2.1×   |  284 MiB/s |  2.3×   |  268 MiB/s |  3.0×   |  270 MiB/s |  1.7×   |
-|   256 B |     356 MiB/s |  2.1×   |  496 MiB/s |  1.4×   |  614 MiB/s |  2.1×   |  633 MiB/s |  1.4×   |
-|   1 KiB |     413 MiB/s |  2.0×   |  802 MiB/s |  1.6×   | 1.19 GiB/s |  2.7×   | 1.27 GiB/s |  1.9×   |
-|   4 KiB |     431 MiB/s |  2.0×   |  945 MiB/s |  1.6×   | 1.98 GiB/s |  3.8×   | 2.23 GiB/s |  2.9×   |
-|  64 KiB |     435 MiB/s |  2.0×   | 1000 MiB/s |  1.7×   | 2.49 GiB/s |  4.4×   | 2.91 GiB/s |  3.5×   |
-|   1 MiB |     434 MiB/s |  1.9×   | 1007 MiB/s |  1.7×   | 2.52 GiB/s |  4.5×   | 2.96 GiB/s |  3.6×   |
+|    msg | Scalar (soft) | speedup |       SSE2 | speedup |       AVX2 | speedup |    AVX-512 | speedup |
+| -----: | ------------: | :-----: | ---------: | :-----: | ---------: | :-----: | ---------: | :-----: |
+|   16 B |      58 MiB/s |  2.1×   |   68 MiB/s |  2.1×   |   61 MiB/s |  2.6×   |   56 MiB/s |  1.3×   |
+|   64 B |     214 MiB/s |  2.1×   |  284 MiB/s |  2.3×   |  268 MiB/s |  3.0×   |  270 MiB/s |  1.7×   |
+|  256 B |     356 MiB/s |  2.1×   |  496 MiB/s |  1.4×   |  614 MiB/s |  2.1×   |  633 MiB/s |  1.4×   |
+|  1 KiB |     413 MiB/s |  2.0×   |  802 MiB/s |  1.6×   | 1.19 GiB/s |  2.7×   | 1.27 GiB/s |  1.9×   |
+|  4 KiB |     431 MiB/s |  2.0×   |  945 MiB/s |  1.6×   | 1.98 GiB/s |  3.8×   | 2.23 GiB/s |  2.9×   |
+| 64 KiB |     435 MiB/s |  2.0×   | 1000 MiB/s |  1.7×   | 2.49 GiB/s |  4.4×   | 2.91 GiB/s |  3.5×   |
+|  1 MiB |     434 MiB/s |  1.9×   | 1007 MiB/s |  1.7×   | 2.52 GiB/s |  4.5×   | 2.96 GiB/s |  3.6×   |
 
 RustCrypto's `poly1305` only supports soft/AVX2, so the benchmark combinations are:
 
