@@ -1,0 +1,60 @@
+[package]
+name         = "chacha20poly1305-simd"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.89"
+description  = "Performance-first ChaCha20-Poly1305 / XChaCha20-Poly1305 AEAD with hand-written x86-64 AVX2 / AVX-512 / SSE2 and aarch64 NEON kernels"
+readme       = "README.md"
+homepage     = "https://github.com/lxl66566/chacha20poly1305-simd"
+repository   = "https://github.com/lxl66566/chacha20poly1305-simd"
+license      = "MIT OR Apache-2.0"
+keywords     = ["aead", "chacha20", "encryption", "poly1305", "simd", "xchacha20"]
+categories   = ["algorithms", "cryptography", "no-std"]
+include      = ["/LICENSE-*", "/README.md", "/benches/**", "/build.rs", "/examples/**", "/src/**", "/tests/**"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+harness = false
+name    = "aead"
+
+[dependencies]
+hotpath = { version = "0.24", optional = true }
+zeroize = { version = "1.8", default-features = false, optional = true }
+
+[dev-dependencies]
+blobby     = { version = "0.4", features = ["alloc"] }
+criterion  = "0.8"
+# RustCrypto upstream implementation, used as benchmark & differential-test reference.
+rustcrypto = { package = "chacha20poly1305", version = "0.11" }
+
+[features]
+default = ["alloc", "std"]
+alloc   = []
+# Requires std (the recorder lives in-process).
+hotpath = ["dep:hotpath", "hotpath/hotpath", "std"]
+std     = ["alloc"]
+# Zeroize secret key material (cipher key, Poly1305 key/state) on drop.
+zeroize = ["dep:zeroize"]
+
+[lints.clippy]
+all                     = { level = "warn", priority = -1 }
+cargo                   = { level = "warn", priority = -1 }
+doc_markdown            = "allow"
+missing_errors_doc      = "allow"
+missing_panics_doc      = "allow"
+multiple_crate_versions = "allow"
+pedantic                = { level = "warn", priority = -1 }
+wildcard_imports        = "allow"
+
+[lints.rust]
+unsafe_code           = "allow"
+unused_qualifications = "warn"
+
+[profile.bench]
+codegen-units = 1
+
+[profile.release]
+codegen-units = 1

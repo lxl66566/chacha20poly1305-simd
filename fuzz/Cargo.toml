@@ -1,0 +1,26 @@
+[package]
+name    = "chacha20poly1305-simd-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+bench = false
+doc   = false
+name  = "differential"
+path  = "fuzz_targets/differential.rs"
+test  = false
+
+[dependencies]
+arbitrary     = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+rustcrypto    = { package = "chacha20poly1305", version = "0.11" }
+
+[dependencies.chacha20poly1305-simd]
+path = ".."
+# Each fuzz job pins the crate under test to one backend via RUSTFLAGS
+# (`--cfg chacha20poly1305_backend=...`, see run.sh), so one machine can fuzz
+# every SIMD kernel without the runtime dispatcher hiding the others.

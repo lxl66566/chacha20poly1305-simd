@@ -1,0 +1,4 @@
+/target
+*.log
+AGENTS.md
+prompt.md

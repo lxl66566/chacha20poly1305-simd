@@ -1,0 +1,272 @@
+{
+ "alloc_chacha20poly1305/ours_1MiB/base": {
+  "mean_ns": 2439144.224285714
+ },
+ "alloc_chacha20poly1305/ours_1MiB/new": {
+  "mean_ns": 2439144.224285714
+ },
+ "alloc_chacha20poly1305/rustcrypto_1MiB/base": {
+  "mean_ns": 1689286.3260279652
+ },
+ "alloc_chacha20poly1305/rustcrypto_1MiB/new": {
+  "mean_ns": 1689286.3260279652
+ },
+ "open_chacha20poly1305/ours_1MiB/base": {
+  "mean_ns": 2354351.3209090917
+ },
+ "open_chacha20poly1305/ours_1MiB/new": {
+  "mean_ns": 2354351.3209090917
+ },
+ "seal_chacha20poly1305/ours_1024/base": {
+  "mean_ns": 2462.7814874005985
+ },
+ "seal_chacha20poly1305/ours_1024/change": {
+  "mean_ns": 0.0013714278917646983
+ },
+ "seal_chacha20poly1305/ours_1024/new": {
+  "mean_ns": 2462.7814874005985
+ },
+ "seal_chacha20poly1305/ours_1048576/base": {
+  "mean_ns": 2372741.128181818
+ },
+ "seal_chacha20poly1305/ours_1048576/change": {
+  "mean_ns": 0.009286307568899144
+ },
+ "seal_chacha20poly1305/ours_1048576/new": {
+  "mean_ns": 2372741.128181818
+ },
+ "seal_chacha20poly1305/ours_128/base": {
+  "mean_ns": 440.66280740528396
+ },
+ "seal_chacha20poly1305/ours_128/change": {
+  "mean_ns": -0.004874092289278709
+ },
+ "seal_chacha20poly1305/ours_128/new": {
+  "mean_ns": 440.66280740528396
+ },
+ "seal_chacha20poly1305/ours_16/base": {
+  "mean_ns": 259.1022080928454
+ },
+ "seal_chacha20poly1305/ours_16/change": {
+  "mean_ns": 0.0019279027318341857
+ },
+ "seal_chacha20poly1305/ours_16/new": {
+  "mean_ns": 259.1022080928454
+ },
+ "seal_chacha20poly1305/ours_16384/base": {
+  "mean_ns": 37142.52890367121
+ },
+ "seal_chacha20poly1305/ours_16384/change": {
+  "mean_ns": 0.007876274700494568
+ },
+ "seal_chacha20poly1305/ours_16384/new": {
+  "mean_ns": 37142.52890367121
+ },
+ "seal_chacha20poly1305/ours_256/base": {
+  "mean_ns": 727.9387769317722
+ },
+ "seal_chacha20poly1305/ours_256/change": {
+  "mean_ns": -0.0013291551589227346
+ },
+ "seal_chacha20poly1305/ours_256/new": {
+  "mean_ns": 727.9387769317722
+ },
+ "seal_chacha20poly1305/ours_262144/base": {
+  "mean_ns": 587882.3832535901
+ },
+ "seal_chacha20poly1305/ours_262144/change": {
+  "mean_ns": -0.005560526029931845
+ },
+ "seal_chacha20poly1305/ours_262144/new": {
+  "mean_ns": 587882.3832535901
+ },
+ "seal_chacha20poly1305/ours_31/base": {
+  "mean_ns": 271.8938860688329
+ },
+ "seal_chacha20poly1305/ours_31/change": {
+  "mean_ns": -0.001641949319905578
+ },
+ "seal_chacha20poly1305/ours_31/new": {
+  "mean_ns": 271.8938860688329
+ },
+ "seal_chacha20poly1305/ours_4096/base": {
+  "mean_ns": 9345.120849663912
+ },
+ "seal_chacha20poly1305/ours_4096/change": {
+  "mean_ns": -7.56538175080701e-05
+ },
+ "seal_chacha20poly1305/ours_4096/new": {
+  "mean_ns": 9345.120849663912
+ },
+ "seal_chacha20poly1305/ours_512/base": {
+  "mean_ns": 1307.951063592897
+ },
+ "seal_chacha20poly1305/ours_512/change": {
+  "mean_ns": 0.0026056654241459754
+ },
+ "seal_chacha20poly1305/ours_512/new": {
+  "mean_ns": 1307.951063592897
+ },
+ "seal_chacha20poly1305/ours_64/base": {
+  "mean_ns": 297.64799977623755
+ },
+ "seal_chacha20poly1305/ours_64/change": {
+  "mean_ns": -0.0020457510906908283
+ },
+ "seal_chacha20poly1305/ours_64/new": {
+  "mean_ns": 297.64799977623755
+ },
+ "seal_chacha20poly1305/ours_65536/base": {
+  "mean_ns": 148217.4353935288
+ },
+ "seal_chacha20poly1305/ours_65536/change": {
+  "mean_ns": 0.006075988123827036
+ },
+ "seal_chacha20poly1305/ours_65536/new": {
+  "mean_ns": 148217.4353935288
+ },
+ "seal_chacha20poly1305/rustcrypto_1024/base": {
+  "mean_ns": 3140.2960664253055
+ },
+ "seal_chacha20poly1305/rustcrypto_1024/change": {
+  "mean_ns": 0.0025710680218293813
+ },
+ "seal_chacha20poly1305/rustcrypto_1024/new": {
+  "mean_ns": 3140.2960664253055
+ },
+ "seal_chacha20poly1305/rustcrypto_1048576/base": {
+  "mean_ns": 1792374.1678441388
+ },
+ "seal_chacha20poly1305/rustcrypto_1048576/change": {
+  "mean_ns": -0.0008771981745315793
+ },
+ "seal_chacha20poly1305/rustcrypto_1048576/new": {
+  "mean_ns": 1792374.1678441388
+ },
+ "seal_chacha20poly1305/rustcrypto_128/base": {
+  "mean_ns": 1899.576678523288
+ },
+ "seal_chacha20poly1305/rustcrypto_128/change": {
+  "mean_ns": -0.0007946452046632135
+ },
+ "seal_chacha20poly1305/rustcrypto_128/new": {
+  "mean_ns": 1899.576678523288
+ },
+ "seal_chacha20poly1305/rustcrypto_16/base": {
+  "mean_ns": 1322.110273972193
+ },
+ "seal_chacha20poly1305/rustcrypto_16/change": {
+  "mean_ns": 0.00023274237760761984
+ },
+ "seal_chacha20poly1305/rustcrypto_16/new": {
+  "mean_ns": 1322.110273972193
+ },
+ "seal_chacha20poly1305/rustcrypto_16384/base": {
+  "mean_ns": 29342.15187036941
+ },
+ "seal_chacha20poly1305/rustcrypto_16384/change": {
+  "mean_ns": -0.0004021887420433412
+ },
+ "seal_chacha20poly1305/rustcrypto_16384/new": {
+  "mean_ns": 29342.15187036941
+ },
+ "seal_chacha20poly1305/rustcrypto_256/base": {
+  "mean_ns": 1826.007201727752
+ },
+ "seal_chacha20poly1305/rustcrypto_256/change": {
+  "mean_ns": 0.0007777460011459958
+ },
+ "seal_chacha20poly1305/rustcrypto_256/new": {
+  "mean_ns": 1826.007201727752
+ },
+ "seal_chacha20poly1305/rustcrypto_262144/base": {
+  "mean_ns": 450407.13391730597
+ },
+ "seal_chacha20poly1305/rustcrypto_262144/change": {
+  "mean_ns": 0.0033489250261367065
+ },
+ "seal_chacha20poly1305/rustcrypto_262144/new": {
+  "mean_ns": 450407.13391730597
+ },
+ "seal_chacha20poly1305/rustcrypto_31/base": {
+  "mean_ns": 1630.6660778481269
+ },
+ "seal_chacha20poly1305/rustcrypto_31/change": {
+  "mean_ns": 0.0003133345767745155
+ },
+ "seal_chacha20poly1305/rustcrypto_31/new": {
+  "mean_ns": 1630.6660778481269
+ },
+ "seal_chacha20poly1305/rustcrypto_4096/base": {
+  "mean_ns": 8378.057384958243
+ },
+ "seal_chacha20poly1305/rustcrypto_4096/change": {
+  "mean_ns": 0.0008377621481525654
+ },
+ "seal_chacha20poly1305/rustcrypto_4096/new": {
+  "mean_ns": 8378.057384958243
+ },
+ "seal_chacha20poly1305/rustcrypto_512/base": {
+  "mean_ns": 2262.5956562155657
+ },
+ "seal_chacha20poly1305/rustcrypto_512/change": {
+  "mean_ns": 0.0005509894736595022
+ },
+ "seal_chacha20poly1305/rustcrypto_512/new": {
+  "mean_ns": 2262.5956562155657
+ },
+ "seal_chacha20poly1305/rustcrypto_64/base": {
+  "mean_ns": 1634.8758952656167
+ },
+ "seal_chacha20poly1305/rustcrypto_64/change": {
+  "mean_ns": -0.0016916557541786226
+ },
+ "seal_chacha20poly1305/rustcrypto_64/new": {
+  "mean_ns": 1634.8758952656167
+ },
+ "seal_chacha20poly1305/rustcrypto_65536/base": {
+  "mean_ns": 113675.46867149256
+ },
+ "seal_chacha20poly1305/rustcrypto_65536/change": {
+  "mean_ns": 0.0059326109216506495
+ },
+ "seal_chacha20poly1305/rustcrypto_65536/new": {
+  "mean_ns": 113675.46867149256
+ },
+ "seal_xchacha20poly1305/ours_1024/base": {
+  "mean_ns": 2565.069340107363
+ },
+ "seal_xchacha20poly1305/ours_1024/change": {
+  "mean_ns": 0.017851968542176966
+ },
+ "seal_xchacha20poly1305/ours_1024/new": {
+  "mean_ns": 2565.069340107363
+ },
+ "seal_xchacha20poly1305/ours_1048576/base": {
+  "mean_ns": 2352619.506818181
+ },
+ "seal_xchacha20poly1305/ours_1048576/change": {
+  "mean_ns": -0.0010850421401699117
+ },
+ "seal_xchacha20poly1305/ours_1048576/new": {
+  "mean_ns": 2352619.506818181
+ },
+ "seal_xchacha20poly1305/rustcrypto_1024/base": {
+  "mean_ns": 3441.1213352095037
+ },
+ "seal_xchacha20poly1305/rustcrypto_1024/change": {
+  "mean_ns": 0.01503487473631715
+ },
+ "seal_xchacha20poly1305/rustcrypto_1024/new": {
+  "mean_ns": 3441.1213352095037
+ },
+ "seal_xchacha20poly1305/rustcrypto_1048576/base": {
+  "mean_ns": 2161013.2413636353
+ },
+ "seal_xchacha20poly1305/rustcrypto_1048576/change": {
+  "mean_ns": 0.014437655523998227
+ },
+ "seal_xchacha20poly1305/rustcrypto_1048576/new": {
+  "mean_ns": 2161013.2413636353
+ }
+}

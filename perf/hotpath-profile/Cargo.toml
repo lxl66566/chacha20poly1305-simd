@@ -1,0 +1,17 @@
+[package]
+name         = "hotpath-profile"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.89"
+description  = "One-shot profiling driver for chacha20poly1305-simd via the hotpath feature"
+publish      = false
+
+[dependencies]
+chacha20poly1305-simd = { path = "../..", features = ["hotpath"] }
+# Must match the crate's pinned hotpath version so the probes and the
+# `HotpathGuard` below share the same global state.
+hotpath               = "0.24"
+
+[profile.release]
+debug         = true
+codegen-units = 1
