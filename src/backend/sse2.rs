@@ -30,6 +30,10 @@ impl Ops for Sse2Ops {
             crate::chacha::sse2::xor_batch4(state, buf[off..].as_mut_ptr());
             off += 256;
         }
+        while buf.len() - off >= 128 {
+            crate::chacha::sse2::xor_pair(state, buf[off..].as_mut_ptr());
+            off += 128;
+        }
         while buf.len() - off >= BLOCK {
             crate::chacha::sse2::xor_single(state, buf[off..].as_mut_ptr());
             off += BLOCK;

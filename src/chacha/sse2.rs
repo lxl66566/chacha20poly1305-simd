@@ -196,6 +196,21 @@ pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
     }
 }
 
+/// Two-block (128-byte) batch — the OpenSSL `ChaCha20_128` tier.
+#[inline(always)]
+pub(crate) unsafe fn xor_pair(state: &mut State, buf: *mut u8) {
+    let v = rows(state);
+    let base = state.words[12];
+    let ctrs = [ctr_row(state, base, 0), ctr_row(state, base, 1)];
+    state.advance(2);
+    let vs = rounds2(&v, &ctrs);
+    let mut p = buf;
+    for quad in &vs {
+        emit_xor_block(quad, p);
+        p = p.add(BLOCK);
+    }
+}
+
 /// Fused prologue: blocks 0 and 1 in one interleaved kernel call — block
 /// 0's first 32 bytes (the Poly1305 one-time key) to `key_out`, block 1's
 /// keystream XORed into `b1` (a zeroed buffer yields the raw keystream).
@@ -301,6 +316,10 @@ mod tests {
                 while fast.len() - off >= 256 {
                     xor_batch4(&mut st, fast[off..].as_mut_ptr());
                     off += 256;
+                }
+                while fast.len() - off >= 128 {
+                    xor_pair(&mut st, fast[off..].as_mut_ptr());
+                    off += 128;
                 }
                 while fast.len() - off >= BLOCK {
                     xor_single(&mut st, fast[off..].as_mut_ptr());

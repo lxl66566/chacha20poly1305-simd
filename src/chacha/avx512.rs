@@ -164,6 +164,38 @@ unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
     ]
 }
 
+/// Two-quad (4-block) variant of [`rounds4`] — the OpenSSL 4x ladder tier
+/// for 256..511-byte tails.
+#[inline(always)]
+unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
+    let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
+    let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], ctrs[1]);
+    for _ in 0..10 {
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        to_cols!(a0, b0, c0, d0);
+        to_cols!(a1, b1, c1, d1);
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        to_rows!(a0, b0, c0, d0);
+        to_rows!(a1, b1, c1, d1);
+    }
+    [
+        [
+            _mm256_add_epi32(a0, v[0]),
+            _mm256_add_epi32(b0, v[1]),
+            _mm256_add_epi32(c0, v[2]),
+            _mm256_add_epi32(d0, ctrs[0]),
+        ],
+        [
+            _mm256_add_epi32(a1, v[0]),
+            _mm256_add_epi32(b1, v[1]),
+            _mm256_add_epi32(c1, v[2]),
+            _mm256_add_epi32(d1, ctrs[1]),
+        ],
+    ]
+}
+
 /// Assemble one 64-byte block from finalized rows: `[a|b]` and `[c|d]`.
 #[inline(always)]
 unsafe fn emit_lo(a: __m256i, b: __m256i, block: usize) -> __m256i {
@@ -228,6 +260,28 @@ pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
         _mm256_storeu_si256(buf.cast(), _mm256_xor_si256(pt_lo, lo));
         _mm256_storeu_si256(buf.add(32).cast(), _mm256_xor_si256(pt_hi, hi));
         buf = buf.add(BLOCK);
+    }
+}
+
+/// Four-block (256-byte) batch — 2 interleaved quads in one kernel call.
+#[inline(always)]
+pub(crate) unsafe fn xor_quad2(state: &mut State, mut buf: *mut u8) {
+    let v = rows(state);
+    let base = state.words[12];
+    let ctrs = [ctr_row(state, base, 0), ctr_row(state, base, 1)];
+    state.advance(4);
+    let vs = rounds2(&v, &ctrs);
+    for quad in &vs {
+        let [a, b, cc, d] = *quad;
+        for blk in 0..2 {
+            let lo = emit_lo(a, b, blk);
+            let hi = emit_hi(cc, d, blk);
+            let pt_lo = _mm256_loadu_si256(buf.cast());
+            let pt_hi = _mm256_loadu_si256(buf.add(32).cast());
+            _mm256_storeu_si256(buf.cast(), _mm256_xor_si256(pt_lo, lo));
+            _mm256_storeu_si256(buf.add(32).cast(), _mm256_xor_si256(pt_hi, hi));
+            buf = buf.add(BLOCK);
+        }
     }
 }
 
@@ -429,6 +483,40 @@ mod tests {
         }
         assert_eq!(ref_buf, fast_buf);
         assert_eq!(ref_st.words, st.words);
+    }
+
+    #[test]
+    fn xor_quad2_matches_soft() {
+        if skip_unsupported() {
+            return;
+        }
+        let key: [u8; 32] = core::array::from_fn(|i| (i * 13 + 5) as u8);
+        let nonce: [u8; 12] = core::array::from_fn(|i| (i * 17 + 9) as u8);
+        for (skip, len) in [(0usize, 256usize), (3, 256), (5, 448)] {
+            let mut st = State::new_ietf(&key, &nonce);
+            st.advance(skip as u32);
+            let mut ref_st = st.clone_struct();
+            let mut fast: Vec<u8> = (0..len).map(|i| (i * 37 + 3) as u8).collect();
+            let mut expect = fast.clone();
+            unsafe {
+                let mut off = 0usize;
+                while fast.len() - off >= 256 {
+                    xor_quad2(&mut st, fast[off..].as_mut_ptr());
+                    off += 256;
+                }
+                while fast.len() - off >= 128 {
+                    xor_quad(&mut st, fast[off..].as_mut_ptr());
+                    off += 128;
+                }
+                while fast.len() - off >= BLOCK {
+                    xor_single(&mut st, fast[off..].as_mut_ptr());
+                    off += BLOCK;
+                }
+                crate::chacha::soft::xor(&mut ref_st, &mut expect);
+            }
+            assert_eq!(expect, fast, "skip {skip} len {len}");
+            assert_eq!(ref_st.words, st.words);
+        }
     }
 }
 

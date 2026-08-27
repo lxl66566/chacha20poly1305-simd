@@ -26,6 +26,10 @@ impl Ops for Avx512Ops {
             crate::chacha::avx512::xor_batch8(state, buf[off..].as_mut_ptr());
             off += 512;
         }
+        while buf.len() - off >= 256 {
+            crate::chacha::avx512::xor_quad2(state, buf[off..].as_mut_ptr());
+            off += 256;
+        }
         while buf.len() - off >= 128 {
             crate::chacha::avx512::xor_quad(state, buf[off..].as_mut_ptr());
             off += 128;
