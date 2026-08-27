@@ -289,9 +289,15 @@ unsafe fn process<O: Ops, const SEAL: bool>(
             if SEAL {
                 O::chacha_xor_batch(state, &mut msg[off..off + batch]);
                 off += batch;
-                while poly_off + BLOCK <= off {
-                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                    poly_off += BLOCK;
+                // Absorb only up to the START of the batch just written:
+                // reading freshly-stored zmm lines immediately stalls on
+                // store→load forwarding; lagging one batch lets the stores
+                // retire first (OpenSSL's fused loop pipelines the same way).
+                let target = off - batch;
+                let n = (target - poly_off) & !(BLOCK - 1);
+                if n > 0 {
+                    poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                    poly_off += n;
                 }
             } else {
                 // Open: poly must lead the xor cursor — every window it
@@ -301,9 +307,12 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                 // only ever advances up to the largest 64-byte boundary
                 // the poly has already absorbed past.
                 let ahead = (off + 2 * batch).min(msg.len());
-                while poly_off + BLOCK <= ahead {
-                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                    poly_off += BLOCK;
+                if poly_off < ahead {
+                    let n = (ahead - poly_off) & !(BLOCK - 1);
+                    if n > 0 {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                        poly_off += n;
+                    }
                 }
                 let xor_end = (off + batch).min(poly_off & !(BLOCK - 1));
                 if xor_end <= off {
@@ -324,6 +333,15 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         }
 
         // Tail: xor / absorb the remainder (may be up to batch-1 bytes).
+        // First drain the bulk windows the pipelined seal absorb deferred
+        // (poly_off may lag `off` by up to one batch).
+        if poly_off < off {
+            let n = (off - poly_off) & !(BLOCK - 1);
+            if n > 0 {
+                poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                poly_off += n;
+            }
+        }
         if off < msg.len() {
             if SEAL {
                 O::chacha_xor(state, &mut msg[off..]);

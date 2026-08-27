@@ -46,6 +46,8 @@ pub(crate) enum Kind {
     Avx2 = 1,
     #[cfg(backend_avx512)]
     Avx512 = 2,
+    #[cfg(backend_avx512)]
+    Avx512Ifma = 6,
     #[cfg(backend_neon)]
     Neon = 4,
     #[cfg(backend_sse2)]
@@ -59,7 +61,11 @@ const FORCED: Kind = Kind::Soft;
 #[cfg(all(force_backend, backend_avx2))]
 const FORCED: Kind = Kind::Avx2;
 #[cfg(all(force_backend, backend_avx512))]
-const FORCED: Kind = Kind::Avx512;
+const FORCED: Kind = if cfg!(target_feature = "avx512ifma") {
+    Kind::Avx512Ifma
+} else {
+    Kind::Avx512
+};
 #[cfg(all(force_backend, backend_neon))]
 const FORCED: Kind = Kind::Neon;
 #[cfg(all(force_backend, backend_sse2))]
@@ -86,6 +92,9 @@ fn detect() -> Kind {
         // explicitly instead of relying on "all AVX-512 CPUs have AVX2".
         && std::arch::is_x86_feature_detected!("avx2")
     {
+        if std::arch::is_x86_feature_detected!("avx512ifma") {
+            return Kind::Avx512Ifma;
+        }
         return Kind::Avx512;
     }
     if std::arch::is_x86_feature_detected!("avx2") {
@@ -119,6 +128,9 @@ fn detect() -> Kind {
             && cfg!(target_feature = "avx512vl")
             && cfg!(target_feature = "avx2")
         {
+            if cfg!(target_feature = "avx512ifma") {
+                return Kind::Avx512Ifma;
+            }
             return Kind::Avx512;
         }
         if cfg!(target_feature = "avx2") {
@@ -152,6 +164,8 @@ fn kind_from_u8(k: u8) -> Kind {
         1 => return Kind::Avx2,
         #[cfg(backend_avx512)]
         2 => return Kind::Avx512,
+        #[cfg(backend_avx512)]
+        6 => return Kind::Avx512Ifma,
         5 => return Kind::Sse2,
         _ => {},
     }
@@ -188,6 +202,8 @@ impl Kind {
             Self::Avx2 => unsafe { avx2::seal(state, aad, msg, tag) },
             #[cfg(backend_avx512)]
             Self::Avx512 => unsafe { avx512::seal(state, aad, msg, tag) },
+            #[cfg(backend_avx512)]
+            Self::Avx512Ifma => unsafe { avx512::seal_ifma(state, aad, msg, tag) },
             #[cfg(backend_neon)]
             Self::Neon => unsafe { neon::seal(state, aad, msg, tag) },
             #[cfg(backend_sse2)]
@@ -203,6 +219,8 @@ impl Kind {
             Self::Avx2 => unsafe { avx2::open(state, aad, buf, tag) },
             #[cfg(backend_avx512)]
             Self::Avx512 => unsafe { avx512::open(state, aad, buf, tag) },
+            #[cfg(backend_avx512)]
+            Self::Avx512Ifma => unsafe { avx512::open_ifma(state, aad, buf, tag) },
             #[cfg(backend_neon)]
             Self::Neon => unsafe { neon::open(state, aad, buf, tag) },
             #[cfg(backend_sse2)]
@@ -221,6 +239,8 @@ pub fn active_backend() -> &'static str {
         Kind::Avx2 => "avx2",
         #[cfg(backend_avx512)]
         Kind::Avx512 => "avx512",
+        #[cfg(backend_avx512)]
+        Kind::Avx512Ifma => "avx512-ifma",
         #[cfg(backend_neon)]
         Kind::Neon => "neon",
         #[cfg(backend_sse2)]

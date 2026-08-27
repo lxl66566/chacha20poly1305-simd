@@ -17,8 +17,8 @@ use core::arch::x86_64::*;
 
 use crate::chacha::{BLOCK, State};
 
-/// Blocks per bulk batch (4 quads × 2).
-pub(crate) const BATCH_BLOCKS: usize = 8;
+/// Blocks per bulk batch (word-major zmm kernel).
+pub(crate) const BATCH_BLOCKS: usize = 16;
 
 /// Load the constant/key rows of `state` broadcast into both 128-bit lanes.
 #[inline(always)]
@@ -227,7 +227,7 @@ pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
         ctr_row(state, base, 2),
         ctr_row(state, base, 3),
     ];
-    state.advance(BATCH_BLOCKS as u32);
+    state.advance(8);
     let vs = rounds4(&v, &ctrs);
 
     let mut p = buf;
@@ -372,9 +372,170 @@ pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks:
     }
 }
 
+// ── 16-block word-major zmm kernel (OpenSSL `ChaCha20_16x` shape) ──
+//
+// Word `w` of the 16 block states lives broadcast across the 16 dword lanes
+// of register `x_w` (lane = block index), so the diagonal round needs NO
+// shuffles at all — diagonals are just different register indices. The
+// YMM quad kernels above pay 6 shuffles per double round (~25% of their
+// instruction mix on Zen 4); this layout pays a single 16×16 dword
+// transpose at the end (~80 shuffle ops per KiB, amortized to noise).
+
+/// Full quarter round on word-major zmm registers.
+macro_rules! qrz {
+    ($a:ident, $b:ident, $c:ident, $d:ident) => {{
+        $a = _mm512_add_epi32($a, $b);
+        $d = _mm512_rol_epi32::<16>(_mm512_xor_si512($d, $a));
+        $c = _mm512_add_epi32($c, $d);
+        $b = _mm512_rol_epi32::<12>(_mm512_xor_si512($b, $c));
+        $a = _mm512_add_epi32($a, $b);
+        $d = _mm512_rol_epi32::<8>(_mm512_xor_si512($d, $a));
+        $c = _mm512_add_epi32($c, $d);
+        $b = _mm512_rol_epi32::<7>(_mm512_xor_si512($b, $c));
+    }};
+}
+
+/// In-lane 4×4 dword transpose of four word-major registers: afterwards
+/// `$w_j`'s 128-bit lane ℓ holds words 4g..4g+3 of block 4ℓ+j (g = group).
+macro_rules! tr4z {
+    ($w0:ident, $w1:ident, $w2:ident, $w3:ident) => {{
+        let t0 = _mm512_unpacklo_epi32($w0, $w1);
+        let t1 = _mm512_unpackhi_epi32($w0, $w1);
+        let t2 = _mm512_unpacklo_epi32($w2, $w3);
+        let t3 = _mm512_unpackhi_epi32($w2, $w3);
+        $w0 = _mm512_unpacklo_epi64(t0, t2);
+        $w1 = _mm512_unpackhi_epi64(t0, t2);
+        $w2 = _mm512_unpacklo_epi64(t1, t3);
+        $w3 = _mm512_unpackhi_epi64(t1, t3);
+    }};
+}
+
+/// Generate 16 keystream blocks and XOR them into `buf`
+/// (`buf.len() == 16 * BLOCK`), advancing the counter.
+// NOTE: #[inline(never)] + explicit target_feature — inlined into the fused
+// engine, the 16 live zmm state vectors (plus the Poly1305 zmm state) exceed
+// LLVM's register budget and it spills the whole state to the stack every
+// round (~950 stack movs in seal_ifma). A standalone function gets the full
+// register file; the per-1024-byte call is noise next to the batch cost.
+#[target_feature(enable = "avx512f")]
+#[inline(never)]
+pub(crate) unsafe fn xor_batch16(state: &mut State, buf: *mut u8) {
+    let w = state.words;
+    let bcast = |i: usize| _mm512_set1_epi32(w[i] as i32);
+    // x12 lane L = base + L; the other words are uniform across lanes.
+    let ctr = _mm512_add_epi32(
+        bcast(12),
+        _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+    );
+    state.advance(16);
+
+    let (mut x0, mut x1, mut x2, mut x3) = (bcast(0), bcast(1), bcast(2), bcast(3));
+    let (mut x4, mut x5, mut x6, mut x7) = (bcast(4), bcast(5), bcast(6), bcast(7));
+    let (mut x8, mut x9, mut x10, mut x11) = (bcast(8), bcast(9), bcast(10), bcast(11));
+    let (mut x12, mut x13, mut x14, mut x15) = (ctr, bcast(13), bcast(14), bcast(15));
+    macro_rules! double_round {
+        () => {{
+            qrz!(x0, x4, x8, x12);
+            qrz!(x1, x5, x9, x13);
+            qrz!(x2, x6, x10, x14);
+            qrz!(x3, x7, x11, x15);
+            qrz!(x0, x5, x10, x15);
+            qrz!(x1, x6, x11, x12);
+            qrz!(x2, x7, x8, x13);
+            qrz!(x3, x4, x9, x14);
+        }};
+    }
+    // Fully unrolled: the rolled loop's back-edge broke LLVM's scheduling
+    // of the 16 independent register chains.
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+    double_round!();
+
+    x0 = _mm512_add_epi32(x0, bcast(0));
+    x1 = _mm512_add_epi32(x1, bcast(1));
+    x2 = _mm512_add_epi32(x2, bcast(2));
+    x3 = _mm512_add_epi32(x3, bcast(3));
+    x4 = _mm512_add_epi32(x4, bcast(4));
+    x5 = _mm512_add_epi32(x5, bcast(5));
+    x6 = _mm512_add_epi32(x6, bcast(6));
+    x7 = _mm512_add_epi32(x7, bcast(7));
+    x8 = _mm512_add_epi32(x8, bcast(8));
+    x9 = _mm512_add_epi32(x9, bcast(9));
+    x10 = _mm512_add_epi32(x10, bcast(10));
+    x11 = _mm512_add_epi32(x11, bcast(11));
+    x12 = _mm512_add_epi32(x12, ctr);
+    x13 = _mm512_add_epi32(x13, bcast(13));
+    x14 = _mm512_add_epi32(x14, bcast(14));
+    x15 = _mm512_add_epi32(x15, bcast(15));
+
+    // 16×16 dword transpose: in-lane 4×4 per word group, then a
+    // 2-level `vpermt2d` gather assembling block b = 4ℓ+k from lane ℓ of
+    // piece k of each group.
+    tr4z!(x0, x1, x2, x3);
+    tr4z!(x4, x5, x6, x7);
+    tr4z!(x8, x9, x10, x11);
+    tr4z!(x12, x13, x14, x15);
+
+    let idx_b = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+    // Explicitly named registers (NOT an indexed array — the array form made
+    // LLVM spill all 16 transposed states to the stack and reload per block).
+    macro_rules! emit {
+        ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
+            const L: i32 = 4 * $l;
+            let idx_a = _mm512_setr_epi32(
+                L,
+                L + 1,
+                L + 2,
+                L + 3,
+                16 + L,
+                16 + L + 1,
+                16 + L + 2,
+                16 + L + 3,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            );
+            let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
+            let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
+            let block = _mm512_permutex2var_epi32(lo, idx_b, hi);
+            let p = buf.add($b * BLOCK);
+            _mm512_storeu_si512(p.cast(), _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block));
+        }};
+    }
+    emit!(0, 0, x0, x4, x8, x12);
+    emit!(1, 0, x1, x5, x9, x13);
+    emit!(2, 0, x2, x6, x10, x14);
+    emit!(3, 0, x3, x7, x11, x15);
+    emit!(4, 1, x0, x4, x8, x12);
+    emit!(5, 1, x1, x5, x9, x13);
+    emit!(6, 1, x2, x6, x10, x14);
+    emit!(7, 1, x3, x7, x11, x15);
+    emit!(8, 2, x0, x4, x8, x12);
+    emit!(9, 2, x1, x5, x9, x13);
+    emit!(10, 2, x2, x6, x10, x14);
+    emit!(11, 2, x3, x7, x11, x15);
+    emit!(12, 3, x0, x4, x8, x12);
+    emit!(13, 3, x1, x5, x9, x13);
+    emit!(14, 3, x2, x6, x10, x14);
+    emit!(15, 3, x3, x7, x11, x15);
+}
+
 /// Single-block (64-byte) kernel in XMM registers.
 #[inline(always)]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
+
     let p = state.words.as_ptr().cast::<__m128i>();
     let v0 = _mm_loadu_si128(p.add(0));
     let v1 = _mm_loadu_si128(p.add(1));
@@ -494,6 +655,34 @@ mod tests {
                 gen_block(&st, &mut fast);
             }
             assert_eq!(soft, fast, "ctr {ctr}");
+        }
+    }
+
+    #[test]
+    fn xor_batch16_matches_soft() {
+        if skip_unsupported() {
+            return;
+        }
+        let key: [u8; 32] = core::array::from_fn(|i| (i * 13 + 5) as u8);
+        let nonce: [u8; 12] = core::array::from_fn(|i| (i * 17 + 9) as u8);
+        for skip in [0u32, 1, 7] {
+            let mut st = State::new_ietf(&key, &nonce);
+            st.advance(skip);
+            let mut ref_buf: Vec<u8> = (0..1024u32).map(|i| (i * 31 + 7) as u8).collect();
+            let mut fast_buf = ref_buf.clone();
+            let mut ref_st = st.clone_struct();
+            unsafe {
+                crate::chacha::soft::xor(&mut ref_st, &mut ref_buf);
+                xor_batch16(&mut st, fast_buf.as_mut_ptr());
+            }
+            for b in 0..16 {
+                assert_eq!(
+                    &ref_buf[b * 64..(b + 1) * 64],
+                    &fast_buf[b * 64..(b + 1) * 64],
+                    "skip {skip} block {b}"
+                );
+            }
+            assert_eq!(ref_st.words, st.words);
         }
     }
 
@@ -677,5 +866,41 @@ mod quad_ctr_tests {
             xor_single(&mut st, fast.as_mut_ptr().add(384));
         }
         assert_eq!(expect, fast);
+    }
+}
+
+#[cfg(test)]
+mod timing_probe {
+    use super::*;
+    use crate::chacha::State;
+    use std::eprintln;
+
+    #[test]
+    fn t_xor_batch16_cycles() {
+        if !(std::arch::is_x86_feature_detected!("avx512f")
+            && std::arch::is_x86_feature_detected!("avx512vl"))
+        {
+            return;
+        }
+        let key: [u8; 32] = core::array::from_fn(|i| (i * 13 + 5) as u8);
+        let nonce: [u8; 12] = core::array::from_fn(|i| (i * 17 + 9) as u8);
+        let mut st = State::new_ietf(&key, &nonce);
+        let mut buf = alloc::vec![0u8; 1 << 20];
+        let iters = 2000;
+        let t0 = std::time::Instant::now();
+        for _ in 0..iters {
+            let mut off = 0;
+            while off < buf.len() {
+                unsafe { xor_batch16(&mut st, buf[off..].as_mut_ptr()) };
+                off += 1024;
+            }
+            std::hint::black_box(&mut buf);
+        }
+        let el = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "xor_batch16: {:.4} ns/B ({:.2} c/B @5.33GHz)",
+            el / (iters << 20) as f64 * 1e9,
+            el / (iters << 20) as f64 * 5.33
+        );
     }
 }
