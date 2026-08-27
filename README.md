@@ -67,31 +67,21 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 ## Performance
 
-> Test environment: AMD Ryzen 9 7945HX (Zen 4) · `cargo bench --bench aead` (seal)  
-> Baseline: RustCrypto `chacha20poly1305` 0.11. Both sides were benchmarked with backends pinned to the same instruction-set tier under identical `RUSTFLAGS`.
+> Test environment: AMD Ryzen 9 7945HX (Zen 4) · Linux · rustc 1.100-nightly  
+> Workload: AEAD **seal** (`encrypt_in_place_detached`, 16-byte AAD, in-place), throughput = msg / wall time.  
+> Contenders: RustCrypto `chacha20poly1305` 0.11 (`cargo bench --bench aead`, same ISA tier) and OpenSSL 4.1.0-dev (static build, `EVP_chacha20_poly1305`, runtime auto-dispatch — on this CPU: AVX-512 ChaCha + AVX-512 IFMA Poly1305; bench driver: [`perf/openssl_bench.c`](perf/openssl_bench.c)).
 
-### x86_64
+![Throughput vs message size](perf/chart-throughput.svg)
 
-The table below lists this implementation's throughput and the speedup over RustCrypto in the same configuration:
+![Speedup over RustCrypto and OpenSSL](perf/chart-speedup.svg)
 
-|    msg | Scalar (soft) | speedup |       SSE2 | speedup |       AVX2 | speedup |    AVX-512 | speedup |
-| -----: | ------------: | :-----: | ---------: | :-----: | ---------: | :-----: | ---------: | :-----: |
-|   16 B |      58 MiB/s |  2.1×   |   68 MiB/s |  2.1×   |   61 MiB/s |  2.6×   |   56 MiB/s |  1.3×   |
-|   64 B |     214 MiB/s |  2.1×   |  284 MiB/s |  2.3×   |  268 MiB/s |  3.0×   |  270 MiB/s |  1.7×   |
-|  256 B |     356 MiB/s |  2.1×   |  496 MiB/s |  1.4×   |  614 MiB/s |  2.1×   |  633 MiB/s |  1.4×   |
-|  1 KiB |     413 MiB/s |  2.0×   |  802 MiB/s |  1.6×   | 1.19 GiB/s |  2.7×   | 1.27 GiB/s |  1.9×   |
-|  4 KiB |     431 MiB/s |  2.0×   |  945 MiB/s |  1.6×   | 1.98 GiB/s |  3.8×   | 2.23 GiB/s |  2.9×   |
-| 64 KiB |     435 MiB/s |  2.0×   | 1000 MiB/s |  1.7×   | 2.49 GiB/s |  4.4×   | 2.91 GiB/s |  3.5×   |
-|  1 MiB |     434 MiB/s |  1.9×   | 1007 MiB/s |  1.7×   | 2.52 GiB/s |  4.5×   | 2.96 GiB/s |  3.6×   |
+Highlights:
 
-RustCrypto's `poly1305` only supports soft/AVX2, so the benchmark combinations are:
-
-- Scalar: ChaCha(soft) + Poly(soft)
-- SSE2: ChaCha(sse2) + Poly(soft)
-- AVX2: ChaCha(avx2) + Poly(avx2)
-- AVX-512: ChaCha(avx-512) + Poly(avx2)
-
-Core performance optimizations: fused ChaCha and Poly1305 pipeline (single pass, avoiding the multi-pass memory traffic of RustCrypto's keystream-then-MAC approach); an additional 4-block batch on the SSE2 tier.
+|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                     |
+| ------------------- | ----------------------------- | --------------------------------------------- |
+| tiny (16–256 B)     | 2.0–4.8×                      | 2.3–2.6× faster (fused prologue pays off)     |
+| mid (512 B – 1 KiB) | 1.7–3.1×                      | ~parity (0.85–1.13×)                          |
+| large (≥ 4 KiB)     | 1.7–4.4× (AVX2 64 KiB: 4.4×)  | OpenSSL ahead (1 MiB: 5.1 GiB/s vs 3.0 GiB/s) |
 
 ### AArch64
 
