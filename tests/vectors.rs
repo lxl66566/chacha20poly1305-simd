@@ -6,7 +6,7 @@
 #![allow(clippy::cast_possible_truncation)]
 
 use chacha20poly1305_simd::{
-    ChaCha20Poly1305, Key, Nonce, Payload, Tag, XChaCha20Poly1305, XNonce, active_backend,
+    ChaCha20Poly1305, Error, Key, Nonce, Payload, Tag, XChaCha20Poly1305, XNonce, active_backend,
 };
 use rustcrypto::aead::{AeadInOut, KeyInit};
 
@@ -78,10 +78,9 @@ mod chacha20poly1305_rfc8439 {
         let mut tag = *TAG;
         tag[15] ^= 1;
         let mut buf = CIPHERTEXT.to_vec();
-        assert!(
-            cipher
-                .decrypt_in_place_detached(NONCE, AAD, &mut buf, &tag)
-                .is_err()
+        assert_eq!(
+            cipher.decrypt_in_place_detached(NONCE, AAD, &mut buf, &tag),
+            Err(Error::TagMismatch)
         );
     }
 }
@@ -344,8 +343,9 @@ fn short_input_no_panic() {
             "len {len}"
         );
         let mut buf = vec![0u8; len];
-        assert!(
-            cipher.decrypt_in_place(&nonce, AAD, &mut buf).is_err(),
+        assert_eq!(
+            cipher.decrypt_in_place(&nonce, AAD, &mut buf),
+            Err(Error::InvalidLength),
             "len {len}"
         );
         assert_eq!(buf.len(), len, "buffer must be untouched on error");

@@ -294,9 +294,13 @@ impl ChaCha20Poly1305 {
         ciphertext_and_tag: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
         let payload = ciphertext_and_tag.into();
-        let (ct, tag) = payload
-            .msg
-            .split_at(payload.msg.len().checked_sub(16).ok_or(Error)?);
+        let (ct, tag) = payload.msg.split_at(
+            payload
+                .msg
+                .len()
+                .checked_sub(16)
+                .ok_or(Error::InvalidLength)?,
+        );
         let mut buf = alloc::vec![0u8; ct.len()];
         buf.copy_from_slice(ct);
         self.decrypt_in_place_detached(
@@ -320,7 +324,7 @@ impl ChaCha20Poly1305 {
         msg: &mut [u8],
     ) -> Result<Tag, Error> {
         if msg.len() >= aead::MAX_LEN {
-            return Err(Error);
+            return Err(Error::MessageTooLong);
         }
         let mut tag = Tag::default();
         let mut st = self.init(nonce);
@@ -344,13 +348,13 @@ impl ChaCha20Poly1305 {
     ) -> Result<(), Error> {
         let mut st = self.init(nonce);
         let r = if buf.len() >= aead::MAX_LEN {
-            Err(Error)
+            Err(Error::MessageTooLong)
         } else {
             with_backend(|b| {
                 if b.open(&mut st, aad, buf, tag) {
                     Ok(())
                 } else {
-                    Err(Error)
+                    Err(Error::TagMismatch)
                 }
             })
         };
@@ -386,7 +390,7 @@ impl ChaCha20Poly1305 {
         aad: &[u8],
         buffer: &mut dyn Buffer,
     ) -> Result<(), Error> {
-        let ct_len = buffer.len().checked_sub(16).ok_or(Error)?;
+        let ct_len = buffer.len().checked_sub(16).ok_or(Error::InvalidLength)?;
         let tag: Tag = buffer
             .as_ref()
             .split_at(ct_len)

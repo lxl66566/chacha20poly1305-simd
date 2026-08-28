@@ -9,17 +9,35 @@ use crate::{
     poly1305::Poly,
 };
 
-/// Opaque authentication failure.
+/// Errors returned by the AEAD API.
+///
+/// [`Error::TagMismatch`] deliberately carries no detail (error-oracle
+/// hygiene). The length variants describe caller-side misuse; message
+/// lengths are public information, so distinguishing them is safe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Error;
+#[non_exhaustive]
+pub enum Error {
+    /// Poly1305 tag verification failed (wrong key / nonce / AAD, or a
+    /// corrupted ciphertext / tag).
+    TagMismatch,
+    /// The message exceeds the ChaCha20 counter space (256 GiB - 64 KiB per
+    /// nonce).
+    MessageTooLong,
+    /// A caller-provided length is invalid: ciphertext shorter than the
+    /// 16-byte tag, or an output buffer smaller than its input.
+    InvalidLength,
+}
 
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("chacha20poly1305: authentication failure")
+        f.write_str(match self {
+            Self::TagMismatch => "chacha20poly1305: authentication failure",
+            Self::MessageTooLong => "chacha20poly1305: message exceeds the ChaCha20 counter space",
+            Self::InvalidLength => "chacha20poly1305: invalid input length",
+        })
     }
 }
 
-#[cfg(feature = "std")]
 impl core::error::Error for Error {}
 
 /// Per-backend primitive operations, monomorphized into the fused engine.
