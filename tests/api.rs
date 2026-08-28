@@ -78,3 +78,13 @@ fn split_tag_helper() {
     let mut short = vec![0u8; 15];
     assert_eq!(split_tag(&mut short), Err(Error::InvalidLength));
 }
+
+#[test]
+#[cfg(feature = "getrandom")]
+fn try_generate_produces_distinct_keys() {
+    use chacha20poly1305_simd::{Generate, Key};
+
+    let a = Key::try_generate().unwrap();
+    let b = Key::try_generate().unwrap();
+    assert_ne!(a, b);
+}

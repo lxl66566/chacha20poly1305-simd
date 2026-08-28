@@ -373,19 +373,32 @@ impl Buffer for bytes::BytesMut {
 #[cfg(feature = "getrandom")]
 pub trait Generate: Sized {
     /// Generate a random value (e.g. a [`Key`] or [`Nonce`]) from the OS
+    /// CSPRNG, surfacing RNG failure instead of panicking.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the OS RNG is unavailable.
+    fn try_generate() -> Result<Self, getrandom::Error>;
+
+    /// Generate a random value (e.g. a [`Key`] or [`Nonce`]) from the OS
     /// CSPRNG.
     ///
     /// # Panics
-    /// Panics if the OS RNG is unavailable.
-    fn generate() -> Self;
+    ///
+    /// Panics if the OS RNG is unavailable — see [`Generate::try_generate`]
+    /// for the fallible variant.
+    #[must_use]
+    fn generate() -> Self {
+        Self::try_generate().expect("OS RNG failure")
+    }
 }
 
 #[cfg(feature = "getrandom")]
 impl<const N: usize> Generate for [u8; N] {
-    fn generate() -> Self {
+    fn try_generate() -> Result<Self, getrandom::Error> {
         let mut buf = [0u8; N];
-        getrandom::fill(&mut buf).expect("OS RNG failure");
-        buf
+        getrandom::fill(&mut buf)?;
+        Ok(buf)
     }
 }
 
