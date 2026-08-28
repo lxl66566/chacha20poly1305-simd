@@ -3,7 +3,7 @@
 use super::{BLOCK, State};
 
 /// 20 rounds of ChaCha, in place on the working state.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn rounds(x: &mut [u32; 16]) {
     for _ in 0..10 {
         column_round(x);
@@ -11,7 +11,7 @@ pub(crate) fn rounds(x: &mut [u32; 16]) {
     }
 }
 
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn column_round(x: &mut [u32; 16]) {
     quarter_round(x, 0, 4, 8, 12);
     quarter_round(x, 1, 5, 9, 13);
@@ -19,7 +19,7 @@ fn column_round(x: &mut [u32; 16]) {
     quarter_round(x, 3, 7, 11, 15);
 }
 
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn diagonal_round(x: &mut [u32; 16]) {
     quarter_round(x, 0, 5, 10, 15);
     quarter_round(x, 1, 6, 11, 12);
@@ -27,7 +27,7 @@ fn diagonal_round(x: &mut [u32; 16]) {
     quarter_round(x, 3, 4, 9, 14);
 }
 
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn quarter_round(x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
     x[a] = x[a].wrapping_add(x[b]);
     x[d] = (x[d] ^ x[a]).rotate_left(16);
@@ -41,7 +41,7 @@ fn quarter_round(x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
 
 /// Generate one keystream block for `state`'s current counter into `out`
 /// (without advancing).
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let mut x = state.words;
     rounds(&mut x);
@@ -52,7 +52,7 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
 
 /// Fused AEAD prologue: block 0's first 32 bytes (one-time key) to
 /// `key_out`, block 1's keystream XORed into `b1`.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let mut ks = [0u8; BLOCK];
     gen_block(state, &mut ks);
@@ -67,7 +67,7 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 
 /// Small-message fused op — same contract as the avx2 kernel's
 /// `gen_ks_small`.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
     let mut blk = [0u8; BLOCK];
@@ -83,7 +83,7 @@ pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks:
 
 /// XOR `buf` with the keystream starting at `state`'s counter, advancing one
 /// counter per 64-byte block.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor(state: &mut State, buf: &mut [u8]) {
     let mut ks = [0u8; BLOCK];
     for chunk in buf.chunks_mut(BLOCK) {

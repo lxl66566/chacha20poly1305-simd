@@ -89,6 +89,14 @@
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
 )]
+// BUGFIX: every `#[inline(always)]` below is downgraded to a plain `#[inline]`
+// hint under `debug_assertions`. LLVM's always-inliner runs even at -O0, so
+// debug builds merged the whole fused pipeline (engine + kernels + Poly1305
+// scalar helpers) into one function whose un-coalesced frame reached ~1.5 MiB
+// and overflowed the default 1 MiB main-thread stack (doctests exited with
+// STATUS_STACK_OVERFLOW on Windows MSVC; test threads pass only because they
+// get 2 MiB). Release codegen is unchanged (byte-identical disassembly).
+// Use `#[cfg_attr(not(debug_assertions), inline(always))]` instead.
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

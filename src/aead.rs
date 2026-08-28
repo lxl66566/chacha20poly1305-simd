@@ -50,6 +50,51 @@ pub(crate) trait Ops {
     /// XOR exactly `CHACHA_BATCH * 64` bytes, advancing the counter.
     /// Hot loop path; may assume full batches.
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]);
+
+    /// Seal bulk run: while full batches remain AND the MAC window cache is
+    /// empty AND at least one batch of already-written ciphertext is
+    /// pending, advance both cursors by whole batches. Returns the new
+    /// `(off, poly_off)`. Default: per-batch unfused steps; overridden when
+    /// the backend fuses cipher+MAC into one loop (measured: across call
+    /// boundaries the latency-bound MAC gets ~zero OoO overlap with the
+    /// cipher).
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn seal_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        mut off: usize,
+        mut poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let batch = Self::CHACHA_BATCH * BLOCK;
+        while msg.len() - off >= batch && poly.pending_blocks() == 0 && off - poly_off >= batch {
+            unsafe {
+                Self::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                poly.absorb_blocks(&msg[poly_off..poly_off + batch]);
+            }
+            off += batch;
+            poly_off += batch;
+        }
+        (off, poly_off)
+    }
+
+    /// Whether `open_bulk` fuses MAC+cipher (default false → the engine's
+    /// poly-leads loop runs unchanged).
+    const FUSED_OPEN: bool = false;
+
+    /// Fused open bulk run. Only called when `FUSED_OPEN` holds and the
+    /// engine has normalized the MAC window cache. Default: no-op.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn open_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let _ = (state, msg, poly);
+        (off, poly_off)
+    }
 }
 
 /// Largest message the IETF 32-bit counter can address (256 GiB - 64 KiB).
@@ -73,7 +118,7 @@ pub(crate) const SMALL_MAX: usize = 3 * BLOCK;
 
 /// Init the Poly1305 state from the one-time key (scrubbed afterwards when
 /// `zeroize` is on) and absorb the zero-padded AAD.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[u8]) -> Poly<B> {
     let mut poly = Poly::<B>::new(key);
     crate::poly1305::clear_key(key);
@@ -90,7 +135,7 @@ unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[
 /// the stream to a 64-byte boundary, drains `absorb4` windows over the
 /// message, then folds the assembled `[ct remainder ‖ zero pad][lengths]`
 /// tail as whole blocks.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
     poly: &mut Poly<B>,
     data: &[u8],
@@ -131,7 +176,7 @@ unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
 
 /// Absorb the ciphertext zero-padding and the AAD/message lengths, then
 /// emit the tag (shared by every path's epilogue).
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn finish_tag<B: crate::poly1305::Backend>(
     poly: &mut Poly<B>,
     aad_len: usize,
@@ -152,7 +197,7 @@ unsafe fn finish_tag<B: crate::poly1305::Backend>(
 // feature-less context every SIMD intrinsic would degrade to an out-of-line
 // call (observed as ~30 cycles/byte — see the note in backend/*).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn seal<O: Ops>(state: &mut State, aad: &[u8], msg: &mut [u8], tag_out: &mut [u8; 16]) {
     debug_assert!(
         msg.len() < MAX_LEN,
@@ -165,7 +210,7 @@ pub(crate) fn seal<O: Ops>(state: &mut State, aad: &[u8], msg: &mut [u8], tag_ou
 /// Fused open (MAC + decrypt). Returns `false` on tag mismatch; `buf`
 /// contents are unspecified in that case.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn open<O: Ops>(state: &mut State, aad: &[u8], buf: &mut [u8], tag: &[u8; 16]) -> bool {
     debug_assert!(
         buf.len() < MAX_LEN,
@@ -180,7 +225,7 @@ pub(crate) fn open<O: Ops>(state: &mut State, aad: &[u8], buf: &mut [u8], tag: &
 /// Shared fused pipeline. `SEAL` selects the per-chunk phase order:
 /// seal = xor then MAC (MAC eats the produced ciphertext), open = MAC then
 /// xor (MAC eats the received ciphertext).
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn process<O: Ops, const SEAL: bool>(
     state: &mut State,
     aad: &[u8],
@@ -287,11 +332,35 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         let batch = O::CHACHA_BATCH * BLOCK;
         while msg.len() - off >= batch {
             if SEAL {
-                O::chacha_xor_batch(state, &mut msg[off..off + batch]);
-                off += batch;
-                while poly_off + BLOCK <= off {
-                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                    poly_off += BLOCK;
+                // Ciphertext from earlier batches not yet absorbed.
+                let avail = off - poly_off;
+                if poly.pending_blocks() == 0 && avail >= batch {
+                    // Fused bulk run: the MAC over earlier batches is
+                    // interleaved with the cipher batch-by-batch.
+                    let (no, np) = O::seal_bulk(state, msg, off, poly_off, &mut poly);
+                    off = no;
+                    poly_off = np;
+                } else {
+                    O::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                    off += batch;
+                    // Absorb only up to the START of the batch just written:
+                    // reading freshly-stored zmm lines immediately stalls on
+                    // store→load forwarding; lagging one batch lets the
+                    // stores retire first (OpenSSL's fused loop pipelines
+                    // the same way).
+                    let target = off - batch;
+                    let base = (target - poly_off) & !(BLOCK - 1);
+                    // Choose n so the MAC's window cache ends EMPTY —
+                    // a later iteration can then take the fused step.
+                    let n = if poly.pending_blocks() % 8 == 4 && base >= BLOCK {
+                        ((base - BLOCK) & !(2 * BLOCK - 1)) + BLOCK
+                    } else {
+                        base & !(2 * BLOCK - 1)
+                    };
+                    if n > 0 {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                        poly_off += n;
+                    }
                 }
             } else {
                 // Open: poly must lead the xor cursor — every window it
@@ -300,10 +369,33 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                 // with the ChaCha 64-byte grid (s ≠ 0), so the xor cursor
                 // only ever advances up to the largest 64-byte boundary
                 // the poly has already absorbed past.
+                if O::FUSED_OPEN {
+                    // Normalize the MAC window cache: absorb one extra
+                    // 64-byte window (still pristine ciphertext — the xor
+                    // cursor is behind it) so the wide batching aligns,
+                    // then run the fused bulk loop.
+                    if poly.pending_blocks() % 8 == 4 && poly_off + BLOCK <= msg.len() {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + BLOCK]);
+                        poly_off += BLOCK;
+                    }
+                    if poly.pending_blocks() == 0
+                        && msg.len() - off >= batch
+                        && msg.len() - poly_off >= batch
+                    {
+                        let (no, np) = O::open_bulk(state, msg, off, poly_off, &mut poly);
+                        off = no;
+                        poly_off = np;
+                        continue;
+                    }
+                }
+                // Poly-leads step (the whole body for non-fused backends).
                 let ahead = (off + 2 * batch).min(msg.len());
-                while poly_off + BLOCK <= ahead {
-                    poly.absorb4(msg[poly_off..poly_off + BLOCK].try_into().unwrap());
-                    poly_off += BLOCK;
+                if poly_off < ahead {
+                    let n = (ahead - poly_off) & !(BLOCK - 1);
+                    if n > 0 {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                        poly_off += n;
+                    }
                 }
                 let xor_end = (off + batch).min(poly_off & !(BLOCK - 1));
                 if xor_end <= off {
@@ -324,6 +416,15 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         }
 
         // Tail: xor / absorb the remainder (may be up to batch-1 bytes).
+        // First drain the bulk windows the pipelined seal absorb deferred
+        // (poly_off may lag `off` by up to one batch).
+        if poly_off < off {
+            let n = (off - poly_off) & !(BLOCK - 1);
+            if n > 0 {
+                poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                poly_off += n;
+            }
+        }
         if off < msg.len() {
             if SEAL {
                 O::chacha_xor(state, &mut msg[off..]);

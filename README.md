@@ -67,7 +67,7 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 ## Performance
 
-> Test environment: AMD Ryzen 9 7945HX (Zen 4) · Linux · rustc 1.100-nightly  
+> Test environment: AMD Ryzen 9 7950X (Zen 4) · Linux · rustc 1.100-nightly  
 > Workload: AEAD **seal** (`encrypt_in_place_detached`, 16-byte AAD, in-place), throughput = msg / wall time.  
 > Contenders: RustCrypto `chacha20poly1305` 0.11 (`cargo bench --bench aead`, same ISA tier) and OpenSSL 4.1.0-dev (static build, `EVP_chacha20_poly1305`, runtime auto-dispatch — on this CPU: AVX-512 ChaCha + AVX-512 IFMA Poly1305; bench driver: [`perf/openssl_bench.c`](perf/openssl_bench.c)).
 
@@ -77,11 +77,11 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 Highlights:
 
-|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                     |
-| ------------------- | ----------------------------- | --------------------------------------------- |
-| tiny (16–256 B)     | 2.0–4.8×                      | 2.3–2.6× faster (fused prologue pays off)     |
-| mid (512 B – 1 KiB) | 1.7–3.1×                      | ~parity (0.85–1.13×)                          |
-| large (≥ 4 KiB)     | 1.7–4.4× (AVX2 64 KiB: 4.4×)  | OpenSSL ahead (1 MiB: 5.1 GiB/s vs 3.0 GiB/s) |
+|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                 |
+| ------------------- | ----------------------------- | ----------------------------------------- |
+| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.2× faster (fused prologue pays off) |
+| mid (512 B – 1 KiB) | 1.8–3.0×                      | ~parity (0.9–1.25×)                       |
+| large (≥ 4 KiB)     | 1.7–6.2× (AVX2 64 KiB: 4.4×)  | parity (1 MiB: 5.15 vs 5.11 GiB/s)        |
 
 ### AArch64
 
@@ -97,7 +97,7 @@ On aarch64, RustCrypto only enables NEON for ChaCha; Poly1305 remains a scalar s
 ## Verification
 
 - RFC 8439 and XChaCha official test vectors (`cargo test`)
-- Differential fuzzing against the RustCrypto implementation (`fuzz/run.sh`), asserting byte-exact ciphertext/tag equality and identical open verdicts. On x86_64 (soft/avx2/avx512 in parallel): a cumulative ≥ 211 million executions across the three backends (80.8M/72.2M/58.9M), 0 crashes.
+- Differential fuzzing against the RustCrypto implementation (`fuzz/run.sh`), asserting byte-exact ciphertext/tag equality and identical open verdicts. On x86_64 (soft/sse2/avx2/avx512 in parallel, 40 min per backend): 226 million executions in the latest run (soft 45.9M / sse2 48.9M / avx2 68.0M / avx512 63.5M), cumulative > 430 million executions, 0 crashes.
 - aarch64 cross-validation under QEMU user mode: randomized differential testing via `cargo run --release --example xcheck -- [iterations] [seed]`; the NEON backend passed 500 thousand differential cases under QEMU
 
 ## License

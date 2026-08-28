@@ -17,6 +17,9 @@ mod test_common;
 // Shared by the avx2 and avx512 AEAD backends.
 #[cfg(any(backend_avx2, backend_avx512))]
 pub(crate) mod avx2;
+// AVX-512 IFMA (vpmadd52) Poly1305 for the avx512-ifma dispatch tier.
+#[cfg(backend_avx512)]
+pub(crate) mod ifma;
 #[cfg(backend_neon)]
 pub(crate) mod neon;
 
@@ -33,6 +36,17 @@ pub(crate) trait Backend {
     /// [`Backend::pending_blocks`] is a multiple of 4 (any deferred batches
     /// are drained first, in order).
     unsafe fn absorb4(&mut self, blocks: &[u8; 64]);
+    /// Hot path: absorb `blocks.len()` bytes (`% 64 == 0`) at a 64-byte
+    /// aligned stream position. Default: per-window [`Backend::absorb4`];
+    /// backends with wide batching override it to keep state in registers
+    /// across windows.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn absorb_blocks(&mut self, blocks: &[u8]) {
+        debug_assert_eq!(blocks.len() % 64, 0);
+        for w in blocks.chunks_exact(64) {
+            unsafe { self.absorb4(w.try_into().unwrap()) };
+        }
+    }
     /// Whole blocks currently batched but not yet folded (0..=8).
     fn pending_blocks(&self) -> usize;
     /// Flush batching, reduce, add `s` and emit the tag.
@@ -56,7 +70,7 @@ pub(crate) struct Poly<B: Backend> {
 }
 
 impl<B: Backend> Poly<B> {
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn new(key: &[u8; 32]) -> Self {
         Self {
             inner: B::init(key),
@@ -70,7 +84,7 @@ impl<B: Backend> Poly<B> {
     }
 
     /// Absorb an arbitrary-length segment (no padding).
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn update(&mut self, mut data: &[u8]) {
         if self.have > 0 {
             // BUGFIX: fill up to the block boundary, not `have` bytes — the
@@ -109,7 +123,7 @@ impl<B: Backend> Poly<B> {
 
     /// Hot-path absorb of exactly 4 blocks at a 64-byte aligned stream
     /// position (no partial tail buffered; `pending_blocks() % 4 == 0`).
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn absorb4(&mut self, blocks: &[u8; 64]) {
         debug_assert_eq!(self.have, 0);
         debug_assert_eq!(self.inner.pending_blocks() % 4, 0);
@@ -123,17 +137,40 @@ impl<B: Backend> Poly<B> {
         self.inner.absorb4(blocks);
     }
 
+    /// Hot-path absorb of `blocks.len()` bytes (`% 64 == 0`) at a 64-byte
+    /// aligned stream position.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub(crate) unsafe fn absorb_blocks(&mut self, blocks: &[u8]) {
+        debug_assert_eq!(self.have, 0);
+        debug_assert_eq!(self.inner.pending_blocks() % 4, 0);
+        debug_assert_eq!(blocks.len() % 64, 0);
+        #[cfg(test)]
+        {
+            self.dbg_absorbed += blocks.len();
+            for &b in blocks {
+                self.dbg_digest = self.dbg_digest.rotate_left(7) ^ u64::from(b);
+            }
+        }
+        unsafe { self.inner.absorb_blocks(blocks) };
+    }
+
     /// Whole blocks not yet folded: batched blocks plus an implicit one if a
     /// partial block is buffered. The engine aligns the bulk stream to
     /// 64-byte boundaries with this.
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn pending_blocks(&self) -> usize {
         self.inner.pending_blocks() + usize::from(self.have > 0)
     }
 
+    /// Fused-kernel access to the inner backend.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub(crate) fn inner_mut(&mut self) -> &mut B {
+        &mut self.inner
+    }
+
     /// Flush everything and emit the tag. The stream must already be
     /// zero-padded to a block boundary by the engine.
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn finalize_into(&mut self, out: &mut [u8; 16]) {
         debug_assert_eq!(self.have, 0, "engine must zero-pad before finalize");
         self.inner.finalize_into(out);

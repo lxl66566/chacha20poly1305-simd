@@ -46,7 +46,7 @@ fn load_le_words(src: &[u8], dst: &mut [u32]) {
 /// `dst ^= src` over equal-length slices, 8 bytes at a time so LLVM lowers
 /// it to wide loads/stores instead of byte ops. Shared by the AEAD engine
 /// and the small-message kernels' partial-block handling.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn xor_bytes(dst: &mut [u8], src: &[u8]) {
     debug_assert_eq!(dst.len(), src.len());
     let (chunks, tail) = dst.as_chunks_mut::<8>();
@@ -79,7 +79,7 @@ impl State {
 
     /// Advance the block counter (wrapping, mirroring upstream semantics at
     /// the u32 boundary; the engine prevents reaching it).
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn advance(&mut self, blocks: u32) {
         self.words[12] = self.words[12].wrapping_add(blocks);
     }
@@ -121,7 +121,7 @@ pub(crate) fn hchacha20(key: &[u8; 32], xnonce: &[u8; 24], out: &mut [u8; 32]) {
 }
 
 /// Scalar ChaCha20 quarter round on word indices.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn quarter_round(x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
     x[a] = x[a].wrapping_add(x[b]);
     x[d] = (x[d] ^ x[a]).rotate_left(16);

@@ -27,7 +27,7 @@ pub(crate) fn parse_key(key: &[u8; 32]) -> ([u32; 5], [u32; 4]) {
 /// Multiply a 5×26-bit limb value by `r` and lazily reduce (the multiply
 /// half of a donna block step; shared with the NEON backend's scalar folds).
 /// `s` holds `5·r[1..5]`.
-#[inline(always)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn mul_r(mut h: [u32; 5], r: &[u32; 5], s: &[u32; 4]) -> [u32; 5] {
     let d0 = u64::from(h[0]) * u64::from(r[0])
         + u64::from(h[1]) * u64::from(s[3])
@@ -165,7 +165,7 @@ impl Backend for SoftPoly {
         Self { r, h: [0; 5], pad }
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_block(&mut self, block: &[u8; 16]) {
         let r = self.r;
         let s1 = r[1] * 5;
@@ -188,14 +188,14 @@ impl Backend for SoftPoly {
         self.h = mul_r([h0, h1, h2, h3, h4], &r, &[s1, s2, s3, s4]);
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb4(&mut self, blocks: &[u8; 64]) {
         for block in blocks.as_chunks::<16>().0 {
             self.absorb_block(block);
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn pending_blocks(&self) -> usize {
         0
     }
