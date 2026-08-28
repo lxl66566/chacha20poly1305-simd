@@ -100,6 +100,50 @@ impl Ops for Avx512IfmaOps {
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         unsafe { <Avx512Ops as Ops>::chacha_xor_batch(state, buf) }
     }
+
+    #[inline(always)]
+    unsafe fn seal_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut crate::poly1305::Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        // SAFETY: callers reached this through the ifma entry points.
+        unsafe {
+            crate::chacha::avx512::xor_batch16_seal_bulk(
+                state,
+                msg.as_mut_ptr(),
+                off,
+                poly_off,
+                msg.len(),
+                poly.inner_mut(),
+            )
+        }
+    }
+
+    const FUSED_OPEN: bool = true;
+
+    #[inline(always)]
+    unsafe fn open_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut crate::poly1305::Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        // SAFETY: callers reached this through the ifma entry points.
+        unsafe {
+            crate::chacha::avx512::xor_batch16_open_bulk(
+                state,
+                msg.as_mut_ptr(),
+                off,
+                poly_off,
+                msg.len(),
+                poly.inner_mut(),
+            )
+        }
+    }
 }
 
 /// Fused seal entry (requires AVX-512F+VL+IFMA at runtime).

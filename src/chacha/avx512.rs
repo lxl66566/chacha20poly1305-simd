@@ -417,119 +417,417 @@ macro_rules! tr4z {
 // LLVM's register budget and it spills the whole state to the stack every
 // round (~950 stack movs in seal_ifma). A standalone function gets the full
 // register file; the per-1024-byte call is noise next to the batch cost.
+/// One double round on sixteen word-major zmm locals.
+macro_rules! dr16 {
+    ($x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+        qrz!($x0, $x4, $x8, $x12);
+        qrz!($x1, $x5, $x9, $x13);
+        qrz!($x2, $x6, $x10, $x14);
+        qrz!($x3, $x7, $x11, $x15);
+        qrz!($x0, $x5, $x10, $x15);
+        qrz!($x1, $x6, $x11, $x12);
+        qrz!($x2, $x7, $x8, $x13);
+        qrz!($x3, $x4, $x9, $x14);
+    }};
+}
+
+/// Feed-forward add ($bc = word broadcast closure, $ctr = original counter
+/// row), 16×16 dword transpose, XOR into `buf`, store.
+macro_rules! emit16 {
+    ($buf:expr, $bc:expr, $ctr:expr,
+     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+        $x0 = _mm512_add_epi32($x0, ($bc)(0));
+        $x1 = _mm512_add_epi32($x1, ($bc)(1));
+        $x2 = _mm512_add_epi32($x2, ($bc)(2));
+        $x3 = _mm512_add_epi32($x3, ($bc)(3));
+        $x4 = _mm512_add_epi32($x4, ($bc)(4));
+        $x5 = _mm512_add_epi32($x5, ($bc)(5));
+        $x6 = _mm512_add_epi32($x6, ($bc)(6));
+        $x7 = _mm512_add_epi32($x7, ($bc)(7));
+        $x8 = _mm512_add_epi32($x8, ($bc)(8));
+        $x9 = _mm512_add_epi32($x9, ($bc)(9));
+        $x10 = _mm512_add_epi32($x10, ($bc)(10));
+        $x11 = _mm512_add_epi32($x11, ($bc)(11));
+        $x12 = _mm512_add_epi32($x12, $ctr);
+        $x13 = _mm512_add_epi32($x13, ($bc)(13));
+        $x14 = _mm512_add_epi32($x14, ($bc)(14));
+        $x15 = _mm512_add_epi32($x15, ($bc)(15));
+
+        // 16×16 dword transpose: in-lane 4×4 per word group, then a
+        // 2-level `vpermt2d` gather assembling block b = 4ℓ+k from lane ℓ
+        // of piece k of each group.
+        tr4z!($x0, $x1, $x2, $x3);
+        tr4z!($x4, $x5, $x6, $x7);
+        tr4z!($x8, $x9, $x10, $x11);
+        tr4z!($x12, $x13, $x14, $x15);
+
+        let buf = $buf;
+        let idx_b =
+            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+        // Explicitly named registers (NOT an indexed array — the array form
+        // made LLVM spill all 16 transposed states to the stack per block).
+        macro_rules! emit {
+            ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
+                const L: i32 = 4 * $l;
+                let idx_a = _mm512_setr_epi32(
+                    L, L + 1, L + 2, L + 3,
+                    16 + L, 16 + L + 1, 16 + L + 2, 16 + L + 3,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                );
+                let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
+                let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
+                let block = _mm512_permutex2var_epi32(lo, idx_b, hi);
+                let p = buf.add($b * BLOCK);
+                _mm512_storeu_si512(
+                    p.cast(),
+                    _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block),
+                );
+            }};
+        }
+        emit!(0, 0, $x0, $x4, $x8, $x12);
+        emit!(1, 0, $x1, $x5, $x9, $x13);
+        emit!(2, 0, $x2, $x6, $x10, $x14);
+        emit!(3, 0, $x3, $x7, $x11, $x15);
+        emit!(4, 1, $x0, $x4, $x8, $x12);
+        emit!(5, 1, $x1, $x5, $x9, $x13);
+        emit!(6, 1, $x2, $x6, $x10, $x14);
+        emit!(7, 1, $x3, $x7, $x11, $x15);
+        emit!(8, 2, $x0, $x4, $x8, $x12);
+        emit!(9, 2, $x1, $x5, $x9, $x13);
+        emit!(10, 2, $x2, $x6, $x10, $x14);
+        emit!(11, 2, $x3, $x7, $x11, $x15);
+        emit!(12, 3, $x0, $x4, $x8, $x12);
+        emit!(13, 3, $x1, $x5, $x9, $x13);
+        emit!(14, 3, $x2, $x6, $x10, $x14);
+        emit!(15, 3, $x3, $x7, $x11, $x15);
+    }};
+}
+
+/// Broadcast the state into word-major locals x0..x15 + the counter row.
+/// x0..x15 ← the (already broadcast) originals o0..o15 with the counter
+/// row from `ctr`. Register-to-register copies only — the rename is free.
+macro_rules! reload16 {
+    ($o0:ident, $o1:ident, $o2:ident, $o3:ident, $o4:ident, $o5:ident, $o6:ident, $o7:ident,
+     $o8:ident, $o9:ident, $o10:ident, $o11:ident, $o12:ident, $o13:ident, $o14:ident, $o15:ident,
+     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {
+        let (mut $x0, mut $x1, mut $x2, mut $x3) = ($o0, $o1, $o2, $o3);
+        let (mut $x4, mut $x5, mut $x6, mut $x7) = ($o4, $o5, $o6, $o7);
+        let (mut $x8, mut $x9, mut $x10, mut $x11) = ($o8, $o9, $o10, $o11);
+        let (mut $x12, mut $x13, mut $x14, mut $x15) = ($o12, $o13, $o14, $o15);
+    };
+}
+
+/// emit16 variant taking the broadcast originals as registers (o12 = the
+/// CURRENT iteration's counter row).
+macro_rules! emit16o {
+    ($buf:expr, $o0:ident, $o1:ident, $o2:ident, $o3:ident, $o4:ident, $o5:ident, $o6:ident, $o7:ident,
+     $o8:ident, $o9:ident, $o10:ident, $o11:ident, $o12:ident, $o13:ident, $o14:ident, $o15:ident,
+     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+        $x0 = _mm512_add_epi32($x0, $o0);
+        $x1 = _mm512_add_epi32($x1, $o1);
+        $x2 = _mm512_add_epi32($x2, $o2);
+        $x3 = _mm512_add_epi32($x3, $o3);
+        $x4 = _mm512_add_epi32($x4, $o4);
+        $x5 = _mm512_add_epi32($x5, $o5);
+        $x6 = _mm512_add_epi32($x6, $o6);
+        $x7 = _mm512_add_epi32($x7, $o7);
+        $x8 = _mm512_add_epi32($x8, $o8);
+        $x9 = _mm512_add_epi32($x9, $o9);
+        $x10 = _mm512_add_epi32($x10, $o10);
+        $x11 = _mm512_add_epi32($x11, $o11);
+        $x12 = _mm512_add_epi32($x12, $o12);
+        $x13 = _mm512_add_epi32($x13, $o13);
+        $x14 = _mm512_add_epi32($x14, $o14);
+        $x15 = _mm512_add_epi32($x15, $o15);
+        tr4z!($x0, $x1, $x2, $x3);
+        tr4z!($x4, $x5, $x6, $x7);
+        tr4z!($x8, $x9, $x10, $x11);
+        tr4z!($x12, $x13, $x14, $x15);
+        let buf = $buf;
+        let idx_b =
+            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+        macro_rules! emit {
+            ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
+                const L: i32 = 4 * $l;
+                let idx_a = _mm512_setr_epi32(
+                    L, L + 1, L + 2, L + 3,
+                    16 + L, 16 + L + 1, 16 + L + 2, 16 + L + 3,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                );
+                let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
+                let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
+                let block = _mm512_permutex2var_epi32(lo, idx_b, hi);
+                let p = buf.add($b * BLOCK);
+                _mm512_storeu_si512(
+                    p.cast(),
+                    _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block),
+                );
+            }};
+        }
+        emit!(0, 0, $x0, $x4, $x8, $x12);
+        emit!(1, 0, $x1, $x5, $x9, $x13);
+        emit!(2, 0, $x2, $x6, $x10, $x14);
+        emit!(3, 0, $x3, $x7, $x11, $x15);
+        emit!(4, 1, $x0, $x4, $x8, $x12);
+        emit!(5, 1, $x1, $x5, $x9, $x13);
+        emit!(6, 1, $x2, $x6, $x10, $x14);
+        emit!(7, 1, $x3, $x7, $x11, $x15);
+        emit!(8, 2, $x0, $x4, $x8, $x12);
+        emit!(9, 2, $x1, $x5, $x9, $x13);
+        emit!(10, 2, $x2, $x6, $x10, $x14);
+        emit!(11, 2, $x3, $x7, $x11, $x15);
+        emit!(12, 3, $x0, $x4, $x8, $x12);
+        emit!(13, 3, $x1, $x5, $x9, $x13);
+        emit!(14, 3, $x2, $x6, $x10, $x14);
+        emit!(15, 3, $x3, $x7, $x11, $x15);
+    }};
+}
+
+// NOTE: no wrapping block — the `let` bindings must escape into the
+// caller's scope (a `{{ }}` body would scope them to the block).
+macro_rules! setup16 {
+    ($state:expr, $w:ident, $bc:ident, $ctr:ident,
+     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {
+        let $w = $state.words;
+        let $bc = |i: usize| _mm512_set1_epi32($w[i] as i32);
+        // x12 lane L = base + L; the other words are uniform across lanes.
+        let $ctr = _mm512_add_epi32(
+            $bc(12),
+            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+        );
+        $state.advance(16);
+        let (mut $x0, mut $x1, mut $x2, mut $x3) = ($bc(0), $bc(1), $bc(2), $bc(3));
+        let (mut $x4, mut $x5, mut $x6, mut $x7) = ($bc(4), $bc(5), $bc(6), $bc(7));
+        let (mut $x8, mut $x9, mut $x10, mut $x11) = ($bc(8), $bc(9), $bc(10), $bc(11));
+        let (mut $x12, mut $x13, mut $x14, mut $x15) = ($ctr, $bc(13), $bc(14), $bc(15));
+    };
+}
+
+// NOTE: #[inline(never)] + explicit target_feature — inlined into the fused
+// engine, the 16 live zmm state vectors (plus the Poly1305 zmm state) exceed
+// LLVM's register budget and it spills the whole state to the stack every
+// round (~950 stack movs in seal_ifma). A standalone function gets the full
+// register file; the per-1024-byte call is noise next to the batch cost.
 #[target_feature(enable = "avx512f")]
 #[inline(never)]
 pub(crate) unsafe fn xor_batch16(state: &mut State, buf: *mut u8) {
+    setup16!(state, w, bcast, ctr,
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    // Fully unrolled: the rolled loop's back-edge broke LLVM's scheduling
+    // of the 16 independent register chains.
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    emit16!(buf, bcast, ctr,
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+}
+
+/// Fused seal bulk: loops [`xor_batch16_fused_seal`]'s interleave over the
+/// whole bulk region, keeping the Poly1305 H/powers and (via the macro
+/// expansion) the cipher schedule entirely in registers across batches —
+/// no per-batch call, state reload, or loop-branch in between. Covers
+/// `[off, len)` in 1024-byte steps while `poly_off + 1024 <= off` (the MAC
+/// only reads ciphertext written by earlier iterations).
+///
+/// Caller contract: `off`/`poly_off` 64-byte aligned, poly window cache
+/// empty (`pending_blocks() == 0`).
+#[target_feature(enable = "avx512f,avx512ifma")]
+#[inline(never)]
+pub(crate) unsafe fn xor_batch16_seal_bulk(
+    state: &mut State,
+    msg: *mut u8,
+    mut off: usize,
+    mut poly_off: usize,
+    len: usize,
+    poly: &mut crate::poly1305::ifma::IfmaPoly,
+) -> (usize, usize) {
+    use crate::poly1305::ifma::{load8, mul_reduce};
+
+    poly.ensure_stream();
+    // SAFETY: just ensured.
+    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
+    let (mut h0, mut h1, mut h2) = (st.h0, st.h1, st.h2);
+    let (r0, r1, r2, s1, s2) = (
+        st.powers.b_r0,
+        st.powers.b_r1,
+        st.powers.b_r2,
+        st.powers.b_s1,
+        st.powers.b_s2,
+    );
+
+    // Hoisted broadcast state: only the counter row changes per iteration.
+    // (LLVM rematerializes these `o` registers into folded broadcast
+    // load-ops instead of occupying 16 registers.)
     let w = state.words;
     let bcast = |i: usize| _mm512_set1_epi32(w[i] as i32);
-    // x12 lane L = base + L; the other words are uniform across lanes.
-    let ctr = _mm512_add_epi32(
+    let (o0, o1, o2, o3) = (bcast(0), bcast(1), bcast(2), bcast(3));
+    let (o4, o5, o6, o7) = (bcast(4), bcast(5), bcast(6), bcast(7));
+    let (o8, o9, o10, o11) = (bcast(8), bcast(9), bcast(10), bcast(11));
+    let (o13, o14, o15) = (bcast(13), bcast(14), bcast(15));
+    let mut ctr = _mm512_add_epi32(
         bcast(12),
         _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
     );
-    state.advance(16);
+    let sixteen = _mm512_set1_epi32(16);
+    let mut iters = 0u32;
 
-    let (mut x0, mut x1, mut x2, mut x3) = (bcast(0), bcast(1), bcast(2), bcast(3));
-    let (mut x4, mut x5, mut x6, mut x7) = (bcast(4), bcast(5), bcast(6), bcast(7));
-    let (mut x8, mut x9, mut x10, mut x11) = (bcast(8), bcast(9), bcast(10), bcast(11));
-    let (mut x12, mut x13, mut x14, mut x15) = (ctr, bcast(13), bcast(14), bcast(15));
-    macro_rules! double_round {
-        () => {{
-            qrz!(x0, x4, x8, x12);
-            qrz!(x1, x5, x9, x13);
-            qrz!(x2, x6, x10, x14);
-            qrz!(x3, x7, x11, x15);
-            qrz!(x0, x5, x10, x15);
-            qrz!(x1, x6, x11, x12);
-            qrz!(x2, x7, x8, x13);
-            qrz!(x3, x4, x9, x14);
-        }};
+    while len - off >= 1024 && poly_off + 1024 <= off {
+        let mut pptr = msg.add(poly_off);
+        reload16!(o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+
+        macro_rules! poly_round {
+            () => {{
+                let (t0, t1, t2) = load8(pptr, pptr.add(64));
+                let (g0, g1, g2) = mul_reduce(h0, h1, h2, r0, r1, r2, s1, s2);
+                h0 = _mm512_add_epi64(g0, t0);
+                h1 = _mm512_add_epi64(g1, t1);
+                h2 = _mm512_add_epi64(g2, t2);
+                pptr = pptr.add(128);
+            }};
+        }
+
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        let _ = pptr;
+
+        emit16o!(msg.add(off),
+            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        off += 1024;
+        poly_off += 1024;
+        iters += 1;
+        ctr = _mm512_add_epi32(ctr, sixteen);
     }
-    // Fully unrolled: the rolled loop's back-edge broke LLVM's scheduling
-    // of the 16 independent register chains.
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
-    double_round!();
 
-    x0 = _mm512_add_epi32(x0, bcast(0));
-    x1 = _mm512_add_epi32(x1, bcast(1));
-    x2 = _mm512_add_epi32(x2, bcast(2));
-    x3 = _mm512_add_epi32(x3, bcast(3));
-    x4 = _mm512_add_epi32(x4, bcast(4));
-    x5 = _mm512_add_epi32(x5, bcast(5));
-    x6 = _mm512_add_epi32(x6, bcast(6));
-    x7 = _mm512_add_epi32(x7, bcast(7));
-    x8 = _mm512_add_epi32(x8, bcast(8));
-    x9 = _mm512_add_epi32(x9, bcast(9));
-    x10 = _mm512_add_epi32(x10, bcast(10));
-    x11 = _mm512_add_epi32(x11, bcast(11));
-    x12 = _mm512_add_epi32(x12, ctr);
-    x13 = _mm512_add_epi32(x13, bcast(13));
-    x14 = _mm512_add_epi32(x14, bcast(14));
-    x15 = _mm512_add_epi32(x15, bcast(15));
+    state.advance(16u32.wrapping_mul(iters));
+    st.h0 = h0;
+    st.h1 = h1;
+    st.h2 = h2;
+    (off, poly_off)
+}
 
-    // 16×16 dword transpose: in-lane 4×4 per word group, then a
-    // 2-level `vpermt2d` gather assembling block b = 4ℓ+k from lane ℓ of
-    // piece k of each group.
-    tr4z!(x0, x1, x2, x3);
-    tr4z!(x4, x5, x6, x7);
-    tr4z!(x8, x9, x10, x11);
-    tr4z!(x12, x13, x14, x15);
+/// Fused open bulk: same interleave as [`xor_batch16_seal_bulk`], but the
+/// MAC reads `[poly_off, poly_off + 1024)` — which overlaps the region THIS
+/// call is about to overwrite. Sound because every poly load happens before
+/// the terminal emit stores (in program order), and it never reads bytes
+/// already overwritten by earlier calls (the cursor relation `poly_off >
+/// off` is maintained by the engine's open prologue).
+#[target_feature(enable = "avx512f,avx512ifma")]
+#[inline(never)]
+pub(crate) unsafe fn xor_batch16_open_bulk(
+    state: &mut State,
+    msg: *mut u8,
+    mut off: usize,
+    mut poly_off: usize,
+    len: usize,
+    poly: &mut crate::poly1305::ifma::IfmaPoly,
+) -> (usize, usize) {
+    use crate::poly1305::ifma::{load8, mul_reduce};
 
-    let idx_b = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
-    // Explicitly named registers (NOT an indexed array — the array form made
-    // LLVM spill all 16 transposed states to the stack and reload per block).
-    macro_rules! emit {
-        ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
-            const L: i32 = 4 * $l;
-            let idx_a = _mm512_setr_epi32(
-                L,
-                L + 1,
-                L + 2,
-                L + 3,
-                16 + L,
-                16 + L + 1,
-                16 + L + 2,
-                16 + L + 3,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            );
-            let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
-            let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
-            let block = _mm512_permutex2var_epi32(lo, idx_b, hi);
-            let p = buf.add($b * BLOCK);
-            _mm512_storeu_si512(p.cast(), _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block));
-        }};
+    poly.ensure_stream();
+    // SAFETY: just ensured.
+    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
+    let (mut h0, mut h1, mut h2) = (st.h0, st.h1, st.h2);
+    let (r0, r1, r2, s1, s2) = (
+        st.powers.b_r0,
+        st.powers.b_r1,
+        st.powers.b_r2,
+        st.powers.b_s1,
+        st.powers.b_s2,
+    );
+
+    let w = state.words;
+    let bcast = |i: usize| _mm512_set1_epi32(w[i] as i32);
+    let (o0, o1, o2, o3) = (bcast(0), bcast(1), bcast(2), bcast(3));
+    let (o4, o5, o6, o7) = (bcast(4), bcast(5), bcast(6), bcast(7));
+    let (o8, o9, o10, o11) = (bcast(8), bcast(9), bcast(10), bcast(11));
+    let (o13, o14, o15) = (bcast(13), bcast(14), bcast(15));
+    let mut ctr = _mm512_add_epi32(
+        bcast(12),
+        _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+    );
+    let sixteen = _mm512_set1_epi32(16);
+    let mut iters = 0u32;
+
+    while len - off >= 1024 && len - poly_off >= 1024 {
+        let mut pptr = msg.add(poly_off);
+        reload16!(o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+
+        macro_rules! poly_round {
+            () => {{
+                let (t0, t1, t2) = load8(pptr, pptr.add(64));
+                let (g0, g1, g2) = mul_reduce(h0, h1, h2, r0, r1, r2, s1, s2);
+                h0 = _mm512_add_epi64(g0, t0);
+                h1 = _mm512_add_epi64(g1, t1);
+                h2 = _mm512_add_epi64(g2, t2);
+                pptr = pptr.add(128);
+            }};
+        }
+
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        poly_round!();
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        let _ = pptr;
+
+        emit16o!(msg.add(off),
+            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        off += 1024;
+        poly_off += 1024;
+        iters += 1;
+        ctr = _mm512_add_epi32(ctr, sixteen);
     }
-    emit!(0, 0, x0, x4, x8, x12);
-    emit!(1, 0, x1, x5, x9, x13);
-    emit!(2, 0, x2, x6, x10, x14);
-    emit!(3, 0, x3, x7, x11, x15);
-    emit!(4, 1, x0, x4, x8, x12);
-    emit!(5, 1, x1, x5, x9, x13);
-    emit!(6, 1, x2, x6, x10, x14);
-    emit!(7, 1, x3, x7, x11, x15);
-    emit!(8, 2, x0, x4, x8, x12);
-    emit!(9, 2, x1, x5, x9, x13);
-    emit!(10, 2, x2, x6, x10, x14);
-    emit!(11, 2, x3, x7, x11, x15);
-    emit!(12, 3, x0, x4, x8, x12);
-    emit!(13, 3, x1, x5, x9, x13);
-    emit!(14, 3, x2, x6, x10, x14);
-    emit!(15, 3, x3, x7, x11, x15);
+
+    state.advance(16u32.wrapping_mul(iters));
+    st.h0 = h0;
+    st.h1 = h1;
+    st.h2 = h2;
+    (off, poly_off)
 }
 
 /// Single-block (64-byte) kernel in XMM registers.
@@ -866,41 +1164,5 @@ mod quad_ctr_tests {
             xor_single(&mut st, fast.as_mut_ptr().add(384));
         }
         assert_eq!(expect, fast);
-    }
-}
-
-#[cfg(test)]
-mod timing_probe {
-    use super::*;
-    use crate::chacha::State;
-    use std::eprintln;
-
-    #[test]
-    fn t_xor_batch16_cycles() {
-        if !(std::arch::is_x86_feature_detected!("avx512f")
-            && std::arch::is_x86_feature_detected!("avx512vl"))
-        {
-            return;
-        }
-        let key: [u8; 32] = core::array::from_fn(|i| (i * 13 + 5) as u8);
-        let nonce: [u8; 12] = core::array::from_fn(|i| (i * 17 + 9) as u8);
-        let mut st = State::new_ietf(&key, &nonce);
-        let mut buf = alloc::vec![0u8; 1 << 20];
-        let iters = 2000;
-        let t0 = std::time::Instant::now();
-        for _ in 0..iters {
-            let mut off = 0;
-            while off < buf.len() {
-                unsafe { xor_batch16(&mut st, buf[off..].as_mut_ptr()) };
-                off += 1024;
-            }
-            std::hint::black_box(&mut buf);
-        }
-        let el = t0.elapsed().as_secs_f64();
-        eprintln!(
-            "xor_batch16: {:.4} ns/B ({:.2} c/B @5.33GHz)",
-            el / (iters << 20) as f64 * 1e9,
-            el / (iters << 20) as f64 * 5.33
-        );
     }
 }

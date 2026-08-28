@@ -117,12 +117,12 @@ fn finalize44(h: Limb3, pad: [u64; 2], out: &mut [u8; 16]) {
 /// `r^(8-LANE_POS[ℓ])` = [r⁸, r⁴, r⁷, r³, r⁶, r², r⁵, r¹] (each with its
 /// `20·limb` companions for the 2^132 wrap-around terms).
 #[derive(Clone)]
-struct Powers {
-    b_r0: __m512i,
-    b_r1: __m512i,
-    b_r2: __m512i,
-    b_s1: __m512i,
-    b_s2: __m512i,
+pub(crate) struct Powers {
+    pub(crate) b_r0: __m512i,
+    pub(crate) b_r1: __m512i,
+    pub(crate) b_r2: __m512i,
+    pub(crate) b_s1: __m512i,
+    pub(crate) b_s2: __m512i,
     l_r0: __m512i,
     l_r1: __m512i,
     l_r2: __m512i,
@@ -132,7 +132,7 @@ struct Powers {
 
 impl Powers {
     #[inline(always)]
-    unsafe fn new(r: Limb3) -> Self {
+    pub(crate) unsafe fn new(r: Limb3) -> Self {
         let r2 = mul44(r, r);
         let r3 = mul44(r2, r);
         let r4 = mul44(r2, r2);
@@ -186,17 +186,17 @@ impl Powers {
 
 /// Streaming state: one limb per zmm, eight block lanes each.
 #[derive(Clone)]
-struct Stream {
-    h0: __m512i,
-    h1: __m512i,
-    h2: __m512i,
-    powers: Powers,
+pub(crate) struct Stream {
+    pub(crate) h0: __m512i,
+    pub(crate) h1: __m512i,
+    pub(crate) h2: __m512i,
+    pub(crate) powers: Powers,
 }
 
 /// Transpose 128 bytes (blocks 0..=3 at `lo`, 4..=7 at `hi`) into
 /// radix-2^44 limb vectors; lane ℓ holds block [`LANE_POS`]`[ℓ]`.
 #[inline(always)]
-unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, __m512i) {
+pub(crate) unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, __m512i) {
     unsafe {
         let z0 = _mm512_loadu_si512(lo.cast());
         let z1 = _mm512_loadu_si512(hi.cast());
@@ -225,7 +225,7 @@ unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, __m512i) {
 /// `(Dlo >> w) + (Dhi << (52 - w))`.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-unsafe fn mul_reduce(
+pub(crate) unsafe fn mul_reduce(
     h0: __m512i,
     h1: __m512i,
     h2: __m512i,
@@ -277,7 +277,7 @@ unsafe fn mul_reduce(
 pub(crate) struct IfmaPoly {
     pad: [u64; 2],
     r: Limb3,
-    stream: Option<Stream>,
+    pub(crate) stream: Option<Stream>,
     // Up to 8 whole blocks are deferred so `absorb4` pairs merge into one
     // 8-lane round and short messages never pay for the r^2..r^8 powers.
     cached: [u8; 128],
@@ -316,6 +316,23 @@ unsafe fn process8(r: Limb3, stream: &mut Option<Stream>, lo: *const u8, hi: *co
 }
 
 impl IfmaPoly {
+    /// Fused-kernel support: ensure the streaming state exists. A zero H
+    /// makes the first group's round a pure load (`mul_reduce(0) + T = T`),
+    /// so the fused loop needs no first-group special case.
+    #[inline(always)]
+    pub(crate) unsafe fn ensure_stream(&mut self) {
+        if self.stream.is_none() {
+            unsafe {
+                self.stream = Some(Stream {
+                    h0: _mm512_setzero_si512(),
+                    h1: _mm512_setzero_si512(),
+                    h2: _mm512_setzero_si512(),
+                    powers: Powers::new(self.r),
+                });
+            }
+        }
+    }
+
     #[inline(always)]
     unsafe fn process_cached(&mut self) {
         debug_assert_eq!(self.num_cached, 8);

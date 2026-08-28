@@ -50,6 +50,54 @@ pub(crate) trait Ops {
     /// XOR exactly `CHACHA_BATCH * 64` bytes, advancing the counter.
     /// Hot loop path; may assume full batches.
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]);
+
+    /// Seal bulk run: while full batches remain AND the MAC window cache is
+    /// empty AND at least one batch of already-written ciphertext is
+    /// pending, advance both cursors by whole batches. Returns the new
+    /// `(off, poly_off)`. Default: per-batch unfused steps; overridden when
+    /// the backend fuses cipher+MAC into one loop (measured: across call
+    /// boundaries the latency-bound MAC gets ~zero OoO overlap with the
+    /// cipher).
+    #[inline(always)]
+    unsafe fn seal_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        mut off: usize,
+        mut poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let batch = Self::CHACHA_BATCH * BLOCK;
+        while msg.len() - off >= batch
+            && poly.pending_blocks() == 0
+            && off - poly_off >= batch
+        {
+            unsafe {
+                Self::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                poly.absorb_blocks(&msg[poly_off..poly_off + batch]);
+            }
+            off += batch;
+            poly_off += batch;
+        }
+        (off, poly_off)
+    }
+
+    /// Whether `open_bulk` fuses MAC+cipher (default false → the engine's
+    /// poly-leads loop runs unchanged).
+    const FUSED_OPEN: bool = false;
+
+    /// Fused open bulk run. Only called when `FUSED_OPEN` holds and the
+    /// engine has normalized the MAC window cache. Default: no-op.
+    #[inline(always)]
+    unsafe fn open_bulk(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let _ = (state, msg, poly);
+        (off, poly_off)
+    }
 }
 
 /// Largest message the IETF 32-bit counter can address (256 GiB - 64 KiB).
@@ -287,17 +335,35 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         let batch = O::CHACHA_BATCH * BLOCK;
         while msg.len() - off >= batch {
             if SEAL {
-                O::chacha_xor_batch(state, &mut msg[off..off + batch]);
-                off += batch;
-                // Absorb only up to the START of the batch just written:
-                // reading freshly-stored zmm lines immediately stalls on
-                // store→load forwarding; lagging one batch lets the stores
-                // retire first (OpenSSL's fused loop pipelines the same way).
-                let target = off - batch;
-                let n = (target - poly_off) & !(BLOCK - 1);
-                if n > 0 {
-                    poly.absorb_blocks(&msg[poly_off..poly_off + n]);
-                    poly_off += n;
+                // Ciphertext from earlier batches not yet absorbed.
+                let avail = off - poly_off;
+                if poly.pending_blocks() == 0 && avail >= batch {
+                    // Fused bulk run: the MAC over earlier batches is
+                    // interleaved with the cipher batch-by-batch.
+                    let (no, np) = O::seal_bulk(state, msg, off, poly_off, &mut poly);
+                    off = no;
+                    poly_off = np;
+                } else {
+                    O::chacha_xor_batch(state, &mut msg[off..off + batch]);
+                    off += batch;
+                    // Absorb only up to the START of the batch just written:
+                    // reading freshly-stored zmm lines immediately stalls on
+                    // store→load forwarding; lagging one batch lets the
+                    // stores retire first (OpenSSL's fused loop pipelines
+                    // the same way).
+                    let target = off - batch;
+                    let base = (target - poly_off) & !(BLOCK - 1);
+                    // Choose n so the MAC's window cache ends EMPTY —
+                    // a later iteration can then take the fused step.
+                    let n = if poly.pending_blocks() % 8 == 4 && base >= BLOCK {
+                        ((base - BLOCK) & !(2 * BLOCK - 1)) + BLOCK
+                    } else {
+                        base & !(2 * BLOCK - 1)
+                    };
+                    if n > 0 {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + n]);
+                        poly_off += n;
+                    }
                 }
             } else {
                 // Open: poly must lead the xor cursor — every window it
@@ -306,6 +372,28 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                 // with the ChaCha 64-byte grid (s ≠ 0), so the xor cursor
                 // only ever advances up to the largest 64-byte boundary
                 // the poly has already absorbed past.
+                if O::FUSED_OPEN {
+                    // Normalize the MAC window cache: absorb one extra
+                    // 64-byte window (still pristine ciphertext — the xor
+                    // cursor is behind it) so the wide batching aligns,
+                    // then run the fused bulk loop.
+                    if poly.pending_blocks() % 8 == 4
+                        && poly_off + BLOCK <= msg.len()
+                    {
+                        poly.absorb_blocks(&msg[poly_off..poly_off + BLOCK]);
+                        poly_off += BLOCK;
+                    }
+                    if poly.pending_blocks() == 0
+                        && msg.len() - off >= batch
+                        && msg.len() - poly_off >= batch
+                    {
+                        let (no, np) = O::open_bulk(state, msg, off, poly_off, &mut poly);
+                        off = no;
+                        poly_off = np;
+                        continue;
+                    }
+                }
+                // Poly-leads step (the whole body for non-fused backends).
                 let ahead = (off + 2 * batch).min(msg.len());
                 if poly_off < ahead {
                     let n = (ahead - poly_off) & !(BLOCK - 1);

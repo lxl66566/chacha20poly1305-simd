@@ -162,6 +162,12 @@ impl<B: Backend> Poly<B> {
         self.inner.pending_blocks() + usize::from(self.have > 0)
     }
 
+    /// Fused-kernel access to the inner backend.
+    #[inline(always)]
+    pub(crate) fn inner_mut(&mut self) -> &mut B {
+        &mut self.inner
+    }
+
     /// Flush everything and emit the tag. The stream must already be
     /// zero-padded to a block boundary by the engine.
     #[inline(always)]
