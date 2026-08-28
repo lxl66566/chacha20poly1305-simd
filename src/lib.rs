@@ -355,6 +355,49 @@ impl<const N: usize> Generate for [u8; N] {
     }
 }
 
+/// Tag-appending `Buffer` methods shared by both cipher types (identical
+/// bodies modulo the nonce type).
+macro_rules! buffer_aead_methods {
+    ($nonce:ty) => {
+        /// In-place encryption appending the tag to a [`Buffer`] (e.g.
+        /// `Vec`).
+        ///
+        /// Returns [`Error::MessageTooLong`] if `buffer.len()` exceeds the
+        /// ChaCha20 counter space.
+        #[cfg(feature = "alloc")]
+        pub fn encrypt_in_place(
+            &self,
+            nonce: &$nonce,
+            aad: &[u8],
+            buffer: &mut dyn Buffer,
+        ) -> Result<(), Error> {
+            let tag = self.encrypt_in_place_detached(nonce, aad, buffer.as_mut_slice())?;
+            buffer.extend_from_slice(&tag)
+        }
+
+        /// In-place decryption stripping a trailing tag from a [`Buffer`]
+        /// (e.g. `Vec`). On error the buffer *length* is unchanged and its
+        /// contents are unspecified: decryption is fused with authentication
+        /// and only verified after it has run.
+        ///
+        /// Returns [`Error::InvalidLength`] if the buffer is shorter than
+        /// the 16-byte tag.
+        #[cfg(feature = "alloc")]
+        pub fn decrypt_in_place(
+            &self,
+            nonce: &$nonce,
+            aad: &[u8],
+            buffer: &mut dyn Buffer,
+        ) -> Result<(), Error> {
+            let ct_len = buffer.len().checked_sub(16).ok_or(Error::InvalidLength)?;
+            let tag: Tag = buffer.as_slice()[ct_len..].try_into().expect("16 bytes");
+            self.decrypt_in_place_detached(nonce, aad, &mut buffer.as_mut_slice()[..ct_len], &tag)?;
+            buffer.truncate(ct_len);
+            Ok(())
+        }
+    };
+}
+
 /// ChaCha20Poly1305 AEAD (RFC 8439).
 // Copy is unavailable under `zeroize`: the Drop impl zeroizes the key.
 #[derive(Clone)]
@@ -364,6 +407,8 @@ pub struct ChaCha20Poly1305 {
 }
 
 impl ChaCha20Poly1305 {
+    buffer_aead_methods!(Nonce);
+
     /// Create a new cipher instance from a 256-bit key.
     #[must_use]
     pub const fn new(key: Key) -> Self {
@@ -475,40 +520,6 @@ impl ChaCha20Poly1305 {
         st.zeroize();
         r
     }
-
-    /// In-place encryption appending the tag to a `Buffer` (e.g. `Vec`).
-    ///
-    /// Returns [`Error`] if `buffer.len()` exceeds the ChaCha20 counter space.
-    #[cfg(feature = "alloc")]
-    pub fn encrypt_in_place(
-        &self,
-        nonce: &Nonce,
-        aad: &[u8],
-        buffer: &mut dyn Buffer,
-    ) -> Result<(), Error> {
-        let tag = self.encrypt_in_place_detached(nonce, aad, buffer.as_mut_slice())?;
-        buffer.extend_from_slice(&tag)
-    }
-
-    /// In-place decryption stripping a trailing tag from a `Buffer` (e.g.
-    /// `Vec`). On error the buffer *length* is unchanged and its contents
-    /// are unspecified: decryption is fused with authentication and only
-    /// verified after it has run (see [`decrypt_in_place_detached`]).
-    ///
-    /// [`decrypt_in_place_detached`]: Self::decrypt_in_place_detached
-    #[cfg(feature = "alloc")]
-    pub fn decrypt_in_place(
-        &self,
-        nonce: &Nonce,
-        aad: &[u8],
-        buffer: &mut dyn Buffer,
-    ) -> Result<(), Error> {
-        let ct_len = buffer.len().checked_sub(16).ok_or(Error::InvalidLength)?;
-        let tag: Tag = buffer.as_slice()[ct_len..].try_into().expect("16 bytes");
-        self.decrypt_in_place_detached(nonce, aad, &mut buffer.as_mut_slice()[..ct_len], &tag)?;
-        buffer.truncate(ct_len);
-        Ok(())
-    }
 }
 
 /// XChaCha20Poly1305 AEAD (extended 192-bit nonce).
@@ -520,6 +531,8 @@ pub struct XChaCha20Poly1305 {
 }
 
 impl XChaCha20Poly1305 {
+    buffer_aead_methods!(XNonce);
+
     /// Create a new cipher instance from a 256-bit key.
     #[must_use]
     pub const fn new(key: Key) -> Self {
