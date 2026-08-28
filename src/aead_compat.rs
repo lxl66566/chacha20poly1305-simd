@@ -1,4 +1,4 @@
-//! RustCrypto [`aead`] 0.5 trait adapters (feature `aead`).
+//! RustCrypto [`aead`] 0.6 trait adapters (feature `aead`).
 //!
 //! Newtype wrappers exposing the native ciphers as [`KeyInit`] /
 //! [`AeadInPlace`] implementors, so they drop into anything generic over

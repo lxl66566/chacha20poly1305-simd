@@ -1,6 +1,6 @@
 [package]
 name         = "chacha20poly1305-simd"
-version      = "0.3.0"
+version      = "0.2.1"
 edition      = "2024"
 rust-version = "1.89"
 description  = "Fast ChaCha20-Poly1305 / XChaCha20-Poly1305 AEAD with hand-written x86-64 AVX2 / AVX-512 / SSE2 and aarch64 NEON kernels"
@@ -30,8 +30,8 @@ harness = false
 name    = "aead"
 
 [dependencies]
-aead      = { version = "0.5", optional = true, default-features = false }
-bytes     = { version = "1", optional = true, default-features = false }
+aead      = { version = "0.6", default-features = false, optional = true }
+bytes     = { version = "1", default-features = false, optional = true }
 getrandom = { version = "0.4", default-features = false, optional = true }
 hotpath   = { version = "0.24", optional = true }
 zeroize   = { version = "1.8", default-features = false, optional = true }
@@ -46,14 +46,14 @@ rustcrypto = { package = "chacha20poly1305", version = "0.11" }
 
 [features]
 default   = ["alloc", "avx512", "std"]
-# RustCrypto `aead` 0.5 trait impls (drop-in ecosystem interop).
+# RustCrypto `aead` trait impls (drop-in ecosystem interop).
 aead      = ["dep:aead"]
 alloc     = []
 # Compile the x86-64 AVX-512 backend. Disable via `default-features = false` to
 # keep AVX-512 instructions out of the binary.
 avx512    = []
 # `Buffer` impl for `bytes::BytesMut`.
-bytes     = ["dep:bytes", "alloc"]
+bytes     = ["alloc", "dep:bytes"]
 # Random key/nonce generation via `Generate::generate()`.
 getrandom = ["dep:getrandom"]
 hotpath   = ["dep:hotpath", "hotpath/hotpath", "std"]

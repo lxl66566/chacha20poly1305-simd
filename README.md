@@ -58,16 +58,16 @@ let nonce = Nonce::generate();
 
 ## Features
 
-| feature     | default | description                                        |
-| ----------- | ------- | -------------------------------------------------- |
-| `avx512`    | ✓       | x86-64 AVX-512 backend                             |
-| `std`       | ✓       | runtime CPU detection (otherwise scalar backend)   |
-| `alloc`     | ✓       | allocating API                                     |
-| `getrandom` | –       | `Key`/`Nonce` random generation via `Generate`     |
-| `aead`      | –       | RustCrypto `aead` 0.5 trait impls (`aead_compat`)  |
-| `bytes`     | –       | `Buffer` impl for `bytes::BytesMut`                |
+| feature     | default | description                                                                            |
+| ----------- | ------- | -------------------------------------------------------------------------------------- |
+| `avx512`    | ✓       | x86-64 AVX-512 backend                                                                 |
+| `std`       | ✓       | runtime CPU detection (otherwise scalar backend)                                       |
+| `alloc`     | ✓       | allocating API                                                                         |
+| `getrandom` | –       | `Key`/`Nonce` random generation via `Generate`                                         |
+| `aead`      | –       | RustCrypto `aead` trait impls (`aead_compat`)                                          |
+| `bytes`     | –       | `Buffer` impl for `bytes::BytesMut`                                                    |
 | `zeroize`   | –       | zeroize keys and secrets on drop (`Buffer` impl for `Zeroizing<Vec<u8>>` with `alloc`) |
-| `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes |
+| `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes                                     |
 
 ## Backend selection
 
