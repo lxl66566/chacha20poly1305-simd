@@ -23,7 +23,7 @@ use chacha20poly1305_simd::{ChaCha20Poly1305, XChaCha20Poly1305, active_backend}
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use rustcrypto::{
     ChaCha20Poly1305 as RcCipher, XChaCha20Poly1305 as RcXCipher,
-    aead::{Aead, AeadInOut, KeyInit, Payload as RcPayload},
+    aead::{Aead, AeadInOut, KeyInit, Payload as RcPayload, inout::InOutBuf},
 };
 
 /// aws-lc-rs bench id: single series, CPU auto-dispatch (no cfg variants).
@@ -107,7 +107,7 @@ fn bench_seal(c: &mut Criterion) {
                     let _ = black_box(theirs.clone().encrypt_inout_detached(
                         black_box(&rnonce),
                         black_box(&aad),
-                        rustcrypto::aead::inout::InOutBuf::from(&mut b[..]),
+                        InOutBuf::from(&mut b[..]),
                     ));
                 },
                 BatchSize::LargeInput,
