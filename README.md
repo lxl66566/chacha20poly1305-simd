@@ -101,17 +101,6 @@ Speedup:
 | mid (512 B – 1 KiB) | 1.8–3.0×                      | 0.9–1.25×                 | 0.65×               |
 | large (≥ 4 KiB)     | 1.7–6.2×                      | 1.0×                      | 1.0-1.4×            |
 
-### AArch64
-
-> Measured under QEMU TCG emulation; the ratios roughly reflect the difference in instructions-per-byte / computational efficiency:
-
-| message              | 64 B    | 256 B   | 1 KiB   | 4 KiB    | 64 KiB   | 1 MiB    |
-| :------------------- | :------ | :------ | :------ | :------- | :------- | :------- |
-| this impl throughput | 38 MB/s | 46 MB/s | 89 MB/s | 105 MB/s | 100 MB/s | 112 MB/s |
-| speedup              | 8.9×    | 9.3×    | 3.6×    | 3.4×     | 2.9×     | 2.0×     |
-
-On aarch64, RustCrypto only enables NEON for ChaCha; Poly1305 remains a scalar soft implementation.
-
 ## Verification
 
 - RFC 8439 and XChaCha official test vectors (`cargo test`)

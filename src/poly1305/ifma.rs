@@ -149,9 +149,9 @@ impl Powers {
         let r7 = mul44(r4, r3);
         let r8 = mul44(r4, r4);
         let lane = [r8, r4, r7, r3, r6, r2, r5, r];
-        debug_assert!(
-            core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]) == [8, 4, 7, 3, 6, 2, 5, 1]
-        );
+        debug_assert_eq!(core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]), [
+            8, 4, 7, 3, 6, 2, 5, 1
+        ]);
         unsafe {
             let col = |i: usize| {
                 _mm512_setr_epi64(

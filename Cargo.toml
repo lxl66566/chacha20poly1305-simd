@@ -1,6 +1,6 @@
 [package]
 name         = "chacha20poly1305-simd"
-version      = "0.1.1"
+version      = "0.2.0"
 edition      = "2024"
 rust-version = "1.89"
 description  = "Fast ChaCha20-Poly1305 / XChaCha20-Poly1305 AEAD with hand-written x86-64 AVX2 / AVX-512 / SSE2 and aarch64 NEON kernels"
@@ -36,9 +36,9 @@ zeroize   = { version = "1.8", default-features = false, optional = true }
 
 [dev-dependencies]
 # AWS-LC (BoringSSL fork), another bench reference (runtime auto-dispatch).
-awslc     = { package = "aws-lc-rs", version = "1.18" }
-blobby    = { version = "0.4", features = ["alloc"] }
-criterion = "0.8"
+awslc      = { package = "aws-lc-rs", version = "1.18" }
+blobby     = { version = "0.4", features = ["alloc"] }
+criterion  = "0.8"
 # RustCrypto upstream implementation, used as benchmark & differential-test reference.
 rustcrypto = { package = "chacha20poly1305", version = "0.11" }
 

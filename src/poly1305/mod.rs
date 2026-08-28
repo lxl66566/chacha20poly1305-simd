@@ -43,8 +43,8 @@ pub(crate) trait Backend {
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_blocks(&mut self, blocks: &[u8]) {
         debug_assert_eq!(blocks.len() % 64, 0);
-        for w in blocks.chunks_exact(64) {
-            unsafe { self.absorb4(w.try_into().unwrap()) };
+        for w in blocks.as_chunks::<64>().0 {
+            unsafe { self.absorb4(w) };
         }
     }
     /// Whole blocks currently batched but not yet folded (0..=8).
