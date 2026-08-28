@@ -47,7 +47,7 @@ assert_eq!(
 );
 ```
 
-Keys and nonces can be generated from the OS CSPRNG with the `getrandom` feature (default on):
+Keys and nonces can be generated from the OS CSPRNG with the (optional) `getrandom` feature:
 
 ```rust
 use chacha20poly1305_simd::{ChaCha20Poly1305, Generate, Key, Nonce};
@@ -63,7 +63,7 @@ let nonce = Nonce::generate();
 | `avx512`    | ✓       | x86-64 AVX-512 backend                             |
 | `std`       | ✓       | runtime CPU detection (otherwise scalar backend)   |
 | `alloc`     | ✓       | allocating API                                     |
-| `getrandom` | ✓       | `Key`/`Nonce` random generation via `Generate`     |
+| `getrandom` | –       | `Key`/`Nonce` random generation via `Generate`     |
 | `zeroize`   | –       | zeroize keys and intermediate secrets on drop      |
 | `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes |
 

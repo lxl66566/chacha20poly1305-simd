@@ -27,7 +27,7 @@
 //! | `std`       | ✓       | runtime CPU detection (otherwise compile-time `target_feature`s)  |
 //! | `alloc`     | ✓       | allocating API                                                    |
 //! | `avx512`    | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
-//! | `getrandom` | ✓       | `Key`/`Nonce` random generation via [`Generate`]                  |
+//! | `getrandom` | –       | `Key`/`Nonce` random generation via [`Generate`]                  |
 //! | `zeroize`   | –       | zeroize keys and intermediate secrets on drop                     |
 //! | `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes                |
 //!
@@ -78,8 +78,8 @@
 //! );
 //! ```
 //! 
-//! Keys and nonces can be generated from the OS CSPRNG with the `getrandom`
-//! feature (default on):
+//! Keys and nonces can be generated from the OS CSPRNG with the (optional)
+//! `getrandom` feature:
 #![cfg_attr(feature = "getrandom", doc = "```")]
 #![cfg_attr(not(feature = "getrandom"), doc = "```ignore")]
 //! # use chacha20poly1305_simd::{ChaCha20Poly1305, Generate, Key, Nonce};
@@ -374,7 +374,11 @@ impl ChaCha20Poly1305 {
     }
 
     /// In-place decryption stripping a trailing tag from a `Buffer` (e.g.
-    /// `Vec`). The buffer is left untouched on authentication failure.
+    /// `Vec`). On error the buffer *length* is unchanged and its contents
+    /// are unspecified: decryption is fused with authentication and only
+    /// verified after it has run (see [`decrypt_in_place_detached`]).
+    ///
+    /// [`decrypt_in_place_detached`]: Self::decrypt_in_place_detached
     #[cfg(feature = "alloc")]
     pub fn decrypt_in_place(
         &self,
