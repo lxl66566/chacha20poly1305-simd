@@ -93,15 +93,13 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 ![Speedup over RustCrypto, OpenSSL and aws-lc-rs](perf/chart-speedup.svg)
 
-Highlights:
+Speedup:
 
-|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                 | vs aws-lc-rs (auto)                           |
-| ------------------- | ----------------------------- | ----------------------------------------- | --------------------------------------------- |
-| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.2× faster (fused prologue pays off) | ~parity–1.7× slower (single-shot EVP_AEAD)    |
-| mid (512 B – 1 KiB) | 1.8–3.0×                      | ~parity (0.9–1.25×)                       | 1.4–1.6× slower                               |
-| large (≥ 4 KiB)     | 1.7–6.2× (AVX2 64 KiB: 4.4×)  | parity (1 MiB: 5.15 vs 5.11 GiB/s)        | up to 1.4× faster (1 MiB: 5.27 vs 3.65 GiB/s) |
-
-Open (decrypt) at 1 MiB: this crate 5.14 GiB/s vs aws-lc-rs 3.54 GiB/s (1.45×).
+|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto) | vs aws-lc-rs (auto) |
+| ------------------- | ----------------------------- | ------------------------- | ------------------- |
+| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.3×                  | 1.0–1.8×            |
+| mid (512 B – 1 KiB) | 1.8–3.0×                      | 0.9–1.25×                 | 0.65×               |
+| large (≥ 4 KiB)     | 1.7–6.2×                      | 1.0×                      | 1.0-1.4×            |
 
 ### AArch64
 

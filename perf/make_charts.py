@@ -219,7 +219,8 @@ def chart_throughput():
     entries: list[tuple[str, str, str | None]] = [
         (f"this crate · {TIER_LABEL[t]}", COLOR[t], None) for t in TIERS
     ]
-    entries.append(("RustCrypto · same tier", "#777", "6 4"))
+    for t in TIERS:
+        entries.append((f"RustCrypto · {TIER_LABEL[t]}", COLOR[t], "6 4"))
     entries.append(("aws-lc-rs 1.18 · auto", AWSLC_COLOR, "4 2"))
     entries.append(("OpenSSL · auto (AVX-512/IFMA)", OSSL_COLOR, "10 4 2 4"))
     bottom_legend(
