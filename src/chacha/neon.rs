@@ -16,22 +16,26 @@ use super::{BLOCK, State};
 /// Blocks per bulk batch (one uint32x4 across 4 counter lanes).
 pub(crate) const BATCH_BLOCKS: usize = 4;
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn rol7(x: uint32x4_t) -> uint32x4_t {
     unsafe { vsraq_n_u32::<25>(vshlq_n_u32::<7>(x), x) }
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn rol8(x: uint32x4_t) -> uint32x4_t {
     unsafe { vsraq_n_u32::<24>(vshlq_n_u32::<8>(x), x) }
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn rol12(x: uint32x4_t) -> uint32x4_t {
     unsafe { vsraq_n_u32::<20>(vshlq_n_u32::<12>(x), x) }
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn rol16(x: uint32x4_t) -> uint32x4_t {
     unsafe { vsraq_n_u32::<16>(vshlq_n_u32::<16>(x), x) }
 }
@@ -85,14 +89,16 @@ macro_rules! double_round {
 }
 
 /// Load state word `i` broadcast across the 4 block lanes.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn dup_word(state: &State, i: usize) -> uint32x4_t {
     unsafe { vdupq_n_u32(state.words[i]) }
 }
 
 /// Full 20 rounds + feed-forward on 4 blocks; returns the finished state as
 /// 16 word-position vectors (lane = block).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds4(state: &State, base: u32) -> [uint32x4_t; 16] {
     let mut x0 = dup_word(state, 0);
     let mut x1 = dup_word(state, 1);
@@ -149,7 +155,8 @@ unsafe fn rounds4(state: &State, base: u32) -> [uint32x4_t; 16] {
 /// Transpose one word-group (4 registers × 4 block lanes) into per-block
 /// vectors, XOR with the plaintext and store 4×16 bytes. Group `g` of block
 /// `k` lands at `buf + k*64 + g*16`.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_xor_group(
     w0: uint32x4_t,
     w1: uint32x4_t,
@@ -175,7 +182,8 @@ unsafe fn emit_xor_group(
 }
 
 /// Generate 4 keystream blocks and XOR them into `buf` (256 bytes).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
     let base = state.words[12];
     let x = rounds4(state, base);
@@ -194,7 +202,8 @@ pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
 /// Single-block (64-byte) kernel: lane = word index, so a quarter round on
 /// (a,b,c,d) runs all four scalar quarter rounds of one round at once; the
 /// diagonal round rotates the b/c/d lanes with `vext`.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds1(state: &State) -> [uint32x4_t; 4] {
     let p = state.words.as_ptr().cast::<u32>();
     let (a0, b0, c0, d0) = (
@@ -224,7 +233,8 @@ unsafe fn rounds1(state: &State) -> [uint32x4_t; 4] {
 }
 
 /// XOR exactly one 64-byte block with the keystream, advancing by 1.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     let v = rounds1(state);
     state.advance(1);
@@ -235,7 +245,8 @@ pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
 }
 
 /// Generate exactly one keystream block (no XOR, no advance).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let v = rounds1(state);
     let p = out.as_mut_ptr().cast::<u32>();
@@ -248,7 +259,8 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
 /// Poly1305 one-time key) to `key_out`, block 1's keystream XORed into
 /// `b1`. Composed from the single-block kernels — a dedicated 2-lane
 /// kernel would save little here (x86-64 is the perf focus of this crate).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let mut blk0 = [0u8; BLOCK];
     gen_block(state, &mut blk0);
@@ -264,7 +276,8 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 /// zeroed scratch (the kernel's XOR thereby yields the raw keystream) and
 /// copies the requested prefix; the counter over-advances by up to 1 —
 /// harmless, the engine never reuses the state afterwards.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len() % BLOCK == 0);
     let mut blk0 = [0u8; BLOCK];

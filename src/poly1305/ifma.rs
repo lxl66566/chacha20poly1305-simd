@@ -4,7 +4,7 @@
 //!
 //! Licensed under the Apache License 2.0 (the "License"); you may not use
 //! this file except in compliance with the License. You can obtain a copy
-//! at https://www.apache.org/licenses/LICENSE-2.0
+//! at <https://www.apache.org/licenses/LICENSE-2.0>
 //!
 //! Source: OpenSSL `crypto/poly1305/asm/poly1305-x86_64.pl` (VPMADD52
 //! radix-2^44 path). This Rust port modifies the original: the streaming
@@ -40,7 +40,8 @@ const LANE_POS: [usize; 8] = [0, 4, 1, 5, 2, 6, 3, 7];
 type Limb3 = [u64; 3];
 
 /// Clamped `r` in radix 2^44.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn clamp_r(key: &[u8; 16]) -> Limb3 {
     let lo = u64::from_le_bytes(key[..8].try_into().unwrap()) & 0x0fff_fffc_0fff_ffff;
     let hi = u64::from_le_bytes(key[8..].try_into().unwrap()) & 0x0fff_fffc_0fff_fffc;
@@ -48,7 +49,8 @@ fn clamp_r(key: &[u8; 16]) -> Limb3 {
 }
 
 /// Split a 16-byte block into radix-2^44 limbs, high bit set.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn block44(block: &[u8; 16]) -> Limb3 {
     let lo = u64::from_le_bytes(block[..8].try_into().unwrap());
     let hi = u64::from_le_bytes(block[8..].try_into().unwrap());
@@ -61,7 +63,8 @@ fn block44(block: &[u8; 16]) -> Limb3 {
 
 /// `a·r` mod (2^130−5) with lazy reduction; `s1`/`s2` are `20·r1`/`20·r2`
 /// (2^132 ≡ 20). Scalar twin of the zmm [`mul_reduce`] round.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn mul44s(a: Limb3, r: Limb3, s1: u64, s2: u64) -> Limb3 {
     let (a0, a1, a2) = (u128::from(a[0]), u128::from(a[1]), u128::from(a[2]));
     let (r0, r1, r2) = (u128::from(r[0]), u128::from(r[1]), u128::from(r[2]));
@@ -80,13 +83,15 @@ fn mul44s(a: Limb3, r: Limb3, s1: u64, s2: u64) -> Limb3 {
     [d0 as u64, d1 as u64, d2 as u64]
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn mul44(a: Limb3, r: Limb3) -> Limb3 {
     mul44s(a, r, 20 * r[1], 20 * r[2])
 }
 
 /// Full carry chain, conditional subtraction of p, `+ pad` mod 2^128, emit.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 fn finalize44(h: Limb3, pad: [u64; 2], out: &mut [u8; 16]) {
     let (mut h0, mut h1, mut h2) = (h[0], h[1], h[2]);
     h1 += h0 >> 44;
@@ -139,7 +144,8 @@ pub(crate) struct Powers {
 }
 
 impl Powers {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn new(r: Limb3) -> Self {
         let r2 = mul44(r, r);
         let r3 = mul44(r2, r);
@@ -149,8 +155,9 @@ impl Powers {
         let r7 = mul44(r4, r3);
         let r8 = mul44(r4, r4);
         let lane = [r8, r4, r7, r3, r6, r2, r5, r];
-        debug_assert!(core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i])
-            == [8, 4, 7, 3, 6, 2, 5, 1]);
+        debug_assert!(
+            core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]) == [8, 4, 7, 3, 6, 2, 5, 1]
+        );
         unsafe {
             let col = |i: usize| {
                 _mm512_setr_epi64(
@@ -203,7 +210,8 @@ pub(crate) struct Stream {
 
 /// Transpose 128 bytes (blocks 0..=3 at `lo`, 4..=7 at `hi`) into
 /// radix-2^44 limb vectors; lane ℓ holds block [`LANE_POS`]`[ℓ]`.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, __m512i) {
     unsafe {
         let z0 = _mm512_loadu_si512(lo.cast());
@@ -213,10 +221,7 @@ pub(crate) unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, _
         let m44 = _mm512_set1_epi64(M44 as i64);
         let t0 = _mm512_and_si512(lo_q, m44);
         let t1 = _mm512_and_si512(
-            _mm512_or_si512(
-                _mm512_srli_epi64::<44>(lo_q),
-                _mm512_slli_epi64::<20>(hi_q),
-            ),
+            _mm512_or_si512(_mm512_srli_epi64::<44>(lo_q), _mm512_slli_epi64::<20>(hi_q)),
             m44,
         );
         let t2 = _mm512_or_si512(
@@ -231,7 +236,8 @@ pub(crate) unsafe fn load8(lo: *const u8, hi: *const u8) -> (__m512i, __m512i, _
 /// the partial reduction (carry at 44/44/42, ≥2^130 wraps ×5). Per lane the
 /// product is `Dlo + (Dhi << 52)`, so the carry out of limb j is
 /// `(Dlo >> w) + (Dhi << (52 - w))`.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn mul_reduce(
     h0: __m512i,
@@ -298,7 +304,8 @@ pub(crate) struct IfmaPoly {
 /// extra r^8; OpenSSL orders its loop the same way). Builds the key powers
 /// on first use. Free fn + raw pointers: taking `&mut self` here forced a
 /// 128-byte by-value copy of the block cache on every round.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn process8(r: Limb3, stream: &mut Option<Stream>, lo: *const u8, hi: *const u8) {
     unsafe {
         let (t0, t1, t2) = load8(lo, hi);
@@ -310,7 +317,7 @@ unsafe fn process8(r: Limb3, stream: &mut Option<Stream>, lo: *const u8, hi: *co
                     h2: t2,
                     powers: Powers::new(r),
                 });
-            }
+            },
             Some(st) => {
                 let p = &st.powers;
                 let (h0, h1, h2) =
@@ -318,7 +325,7 @@ unsafe fn process8(r: Limb3, stream: &mut Option<Stream>, lo: *const u8, hi: *co
                 st.h0 = _mm512_add_epi64(h0, t0);
                 st.h1 = _mm512_add_epi64(h1, t1);
                 st.h2 = _mm512_add_epi64(h2, t2);
-            }
+            },
         }
     }
 }
@@ -327,7 +334,8 @@ impl IfmaPoly {
     /// Fused-kernel support: ensure the streaming state exists. A zero H
     /// makes the first group's round a pure load (`mul_reduce(0) + T = T`),
     /// so the fused loop needs no first-group special case.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn ensure_stream(&mut self) {
         if self.stream.is_none() {
             unsafe {
@@ -341,13 +349,15 @@ impl IfmaPoly {
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn process_cached(&mut self) {
         debug_assert_eq!(self.num_cached, 8);
         let p = self.cached.as_ptr();
         unsafe { process8(self.r, &mut self.stream, p, p.add(64)) };
         self.num_cached = 0;
     }
+
     /// Bulk path: the whole run is processed with H and the r^8 power set
     /// held in registers across rounds (per-64B `absorb4` would round-trip
     /// the zmm state through the stack every window).
@@ -369,7 +379,12 @@ impl IfmaPoly {
             }
             // Pair a pending half-cache with the first window.
             if self.num_cached == 4 && !blocks.is_empty() {
-                process8(self.r, &mut self.stream, self.cached.as_ptr(), blocks.as_ptr());
+                process8(
+                    self.r,
+                    &mut self.stream,
+                    self.cached.as_ptr(),
+                    blocks.as_ptr(),
+                );
                 blocks = &blocks[64..];
                 self.num_cached = 0;
             }
@@ -387,12 +402,12 @@ impl IfmaPoly {
                             powers: Powers::new(self.r),
                         });
                         blocks = &blocks[128..];
-                    }
+                    },
                     Some(st) => {
                         h0 = st.h0;
                         h1 = st.h1;
                         h2 = st.h2;
-                    }
+                    },
                 }
                 if blocks.len() >= 128 {
                     // Hoist the powers into locals: 10 zmm registers.
@@ -430,11 +445,11 @@ impl IfmaPoly {
             }
         }
     }
-
 }
 
 impl Backend for IfmaPoly {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn init(key: &[u8; 32]) -> Self {
         Self {
             pad: [
@@ -448,7 +463,8 @@ impl Backend for IfmaPoly {
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_block(&mut self, block: &[u8; 16]) {
         if self.num_cached == 8 {
             unsafe { self.process_cached() };
@@ -457,14 +473,20 @@ impl Backend for IfmaPoly {
         self.num_cached += 1;
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb4(&mut self, blocks: &[u8; 64]) {
         debug_assert_eq!(self.num_cached % 4, 0, "stream must be 64B-aligned");
         if self.num_cached == 4 {
             // Fuse the cached half with the new one: one 8-lane round.
             unsafe {
-                process8(self.r, &mut self.stream, self.cached.as_ptr(), blocks.as_ptr())
-            };
+                process8(
+                    self.r,
+                    &mut self.stream,
+                    self.cached.as_ptr(),
+                    blocks.as_ptr(),
+                );
+            }
             self.num_cached = 0;
         } else {
             if self.num_cached == 8 {
@@ -475,14 +497,16 @@ impl Backend for IfmaPoly {
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_blocks(&mut self, blocks: &[u8]) {
         // SAFETY: the avx512-ifma backend entry points guarantee
         // AVX-512F+IFMA.
         unsafe { self.absorb_blocks_bulk(blocks) }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn pending_blocks(&self) -> usize {
         self.num_cached
     }
@@ -500,7 +524,8 @@ impl Backend for IfmaPoly {
         self.num_cached = 0;
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn finalize_into(&mut self, out: &mut [u8; 16]) {
         debug_assert!(self.num_cached <= 8);
         let mut acc: Limb3 = [0; 3];

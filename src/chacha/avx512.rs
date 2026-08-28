@@ -21,7 +21,8 @@ use crate::chacha::{BLOCK, State};
 pub(crate) const BATCH_BLOCKS: usize = 16;
 
 /// Load the constant/key rows of `state` broadcast into both 128-bit lanes.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rows(state: &State) -> [__m256i; 3] {
     let p = state.words.as_ptr().cast::<__m128i>();
     [
@@ -34,7 +35,8 @@ unsafe fn rows(state: &State) -> [__m256i; 3] {
 /// Counter row for quad `k`: `[c0, w13, w14, w15 | c0+1, w13, w14, w15]`
 /// where `c0 = base + 2k`. Built directly (the broadcast+add form double
 /// counts `w12`, which only worked by accident at counter 0).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn ctr_row(state: &State, base: u32, k: usize) -> __m256i {
     let w = state.words;
     let c0 = base.wrapping_add(2 * k as u32);
@@ -94,7 +96,8 @@ macro_rules! to_rows {
 
 /// Full 20 rounds + feed-forward add on 4 quads (8 blocks), state held in
 /// 16 explicit locals so it stays in registers.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
     let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], ctrs[1]);
@@ -147,7 +150,8 @@ unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
 }
 
 /// Single-quad (2-block) variant of [`rounds4`].
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
     let (mut a, mut b, mut c, mut d) = (v[0], v[1], v[2], ctr);
     for _ in 0..10 {
@@ -166,7 +170,8 @@ unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
 
 /// Two-quad (4-block) variant of [`rounds4`] — the OpenSSL 4x ladder tier
 /// for 256..511-byte tails.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
     let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], ctrs[1]);
@@ -197,7 +202,8 @@ unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
 }
 
 /// Assemble one 64-byte block from finalized rows: `[a|b]` and `[c|d]`.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_lo(a: __m256i, b: __m256i, block: usize) -> __m256i {
     match block {
         0 => _mm256_permute2f128_si256::<0x20>(a, b),
@@ -205,7 +211,8 @@ unsafe fn emit_lo(a: __m256i, b: __m256i, block: usize) -> __m256i {
     }
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_hi(c: __m256i, d: __m256i, block: usize) -> __m256i {
     match block {
         0 => _mm256_permute2f128_si256::<0x20>(c, d),
@@ -217,7 +224,8 @@ unsafe fn emit_hi(c: __m256i, d: __m256i, block: usize) -> __m256i {
 /// (`buf.len() == BATCH_BLOCKS * BLOCK`), advancing the counter.
 ///
 /// Counter wrap-around mirrors upstream wrapping semantics at u32.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
     let v = rows(state);
     let base = state.words[12];
@@ -246,7 +254,8 @@ pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
 }
 
 /// Two-block (128-byte) batch for mid-size tails.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
     let v = rows(state);
     let c = ctr_row(state, state.words[12], 0);
@@ -264,7 +273,8 @@ pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
 }
 
 /// Four-block (256-byte) batch — 2 interleaved quads in one kernel call.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad2(state: &mut State, mut buf: *mut u8) {
     let v = rows(state);
     let base = state.words[12];
@@ -288,7 +298,8 @@ pub(crate) unsafe fn xor_quad2(state: &mut State, mut buf: *mut u8) {
 /// Fused prologue: blocks 0 and 1 in one quad call — block 0's first 32
 /// bytes (the Poly1305 one-time key) to `key_out`, block 1's keystream
 /// XORed into `b1` (a zeroed buffer yields the raw keystream).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let v = rows(state);
     let c = ctr_row(state, state.words[12], 0);
@@ -320,7 +331,8 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 /// Small-message fused op — same contract as the avx2 kernel's
 /// `gen_ks_small` (block 0's first 32 bytes → one-time key, raw message
 /// keystream blocks written to `ks`, one kernel call).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
     if ks.is_empty() {
@@ -419,8 +431,24 @@ macro_rules! tr4z {
 // register file; the per-1024-byte call is noise next to the batch cost.
 /// One double round on sixteen word-major zmm locals.
 macro_rules! dr16 {
-    ($x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
-     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+    (
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {{
         qrz!($x0, $x4, $x8, $x12);
         qrz!($x1, $x5, $x9, $x13);
         qrz!($x2, $x6, $x10, $x14);
@@ -435,9 +463,27 @@ macro_rules! dr16 {
 /// Feed-forward add ($bc = word broadcast closure, $ctr = original counter
 /// row), 16×16 dword transpose, XOR into `buf`, store.
 macro_rules! emit16 {
-    ($buf:expr, $bc:expr, $ctr:expr,
-     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
-     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+    (
+        $buf:expr,
+        $bc:expr,
+        $ctr:expr,
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {{
         $x0 = _mm512_add_epi32($x0, ($bc)(0));
         $x1 = _mm512_add_epi32($x1, ($bc)(1));
         $x2 = _mm512_add_epi32($x2, ($bc)(2));
@@ -464,17 +510,29 @@ macro_rules! emit16 {
         tr4z!($x12, $x13, $x14, $x15);
 
         let buf = $buf;
-        let idx_b =
-            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+        let idx_b = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
         // Explicitly named registers (NOT an indexed array — the array form
         // made LLVM spill all 16 transposed states to the stack per block).
         macro_rules! emit {
-            ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
+            ($b: expr,$l: expr,$g0: ident,$g1: ident,$g2: ident,$g3: ident) => {{
                 const L: i32 = 4 * $l;
                 let idx_a = _mm512_setr_epi32(
-                    L, L + 1, L + 2, L + 3,
-                    16 + L, 16 + L + 1, 16 + L + 2, 16 + L + 3,
-                    0, 0, 0, 0, 0, 0, 0, 0,
+                    L,
+                    L + 1,
+                    L + 2,
+                    L + 3,
+                    16 + L,
+                    16 + L + 1,
+                    16 + L + 2,
+                    16 + L + 3,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
                 );
                 let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
                 let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
@@ -509,10 +567,40 @@ macro_rules! emit16 {
 /// x0..x15 ← the (already broadcast) originals o0..o15 with the counter
 /// row from `ctr`. Register-to-register copies only — the rename is free.
 macro_rules! reload16 {
-    ($o0:ident, $o1:ident, $o2:ident, $o3:ident, $o4:ident, $o5:ident, $o6:ident, $o7:ident,
-     $o8:ident, $o9:ident, $o10:ident, $o11:ident, $o12:ident, $o13:ident, $o14:ident, $o15:ident,
-     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
-     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {
+    (
+        $o0:ident,
+        $o1:ident,
+        $o2:ident,
+        $o3:ident,
+        $o4:ident,
+        $o5:ident,
+        $o6:ident,
+        $o7:ident,
+        $o8:ident,
+        $o9:ident,
+        $o10:ident,
+        $o11:ident,
+        $o12:ident,
+        $o13:ident,
+        $o14:ident,
+        $o15:ident,
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {
         let (mut $x0, mut $x1, mut $x2, mut $x3) = ($o0, $o1, $o2, $o3);
         let (mut $x4, mut $x5, mut $x6, mut $x7) = ($o4, $o5, $o6, $o7);
         let (mut $x8, mut $x9, mut $x10, mut $x11) = ($o8, $o9, $o10, $o11);
@@ -523,10 +611,41 @@ macro_rules! reload16 {
 /// emit16 variant taking the broadcast originals as registers (o12 = the
 /// CURRENT iteration's counter row).
 macro_rules! emit16o {
-    ($buf:expr, $o0:ident, $o1:ident, $o2:ident, $o3:ident, $o4:ident, $o5:ident, $o6:ident, $o7:ident,
-     $o8:ident, $o9:ident, $o10:ident, $o11:ident, $o12:ident, $o13:ident, $o14:ident, $o15:ident,
-     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
-     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {{
+    (
+        $buf:expr,
+        $o0:ident,
+        $o1:ident,
+        $o2:ident,
+        $o3:ident,
+        $o4:ident,
+        $o5:ident,
+        $o6:ident,
+        $o7:ident,
+        $o8:ident,
+        $o9:ident,
+        $o10:ident,
+        $o11:ident,
+        $o12:ident,
+        $o13:ident,
+        $o14:ident,
+        $o15:ident,
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {{
         $x0 = _mm512_add_epi32($x0, $o0);
         $x1 = _mm512_add_epi32($x1, $o1);
         $x2 = _mm512_add_epi32($x2, $o2);
@@ -548,15 +667,27 @@ macro_rules! emit16o {
         tr4z!($x8, $x9, $x10, $x11);
         tr4z!($x12, $x13, $x14, $x15);
         let buf = $buf;
-        let idx_b =
-            _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+        let idx_b = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
         macro_rules! emit {
-            ($b:expr, $l:expr, $g0:ident, $g1:ident, $g2:ident, $g3:ident) => {{
+            ($b: expr,$l: expr,$g0: ident,$g1: ident,$g2: ident,$g3: ident) => {{
                 const L: i32 = 4 * $l;
                 let idx_a = _mm512_setr_epi32(
-                    L, L + 1, L + 2, L + 3,
-                    16 + L, 16 + L + 1, 16 + L + 2, 16 + L + 3,
-                    0, 0, 0, 0, 0, 0, 0, 0,
+                    L,
+                    L + 1,
+                    L + 2,
+                    L + 3,
+                    16 + L,
+                    16 + L + 1,
+                    16 + L + 2,
+                    16 + L + 3,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
                 );
                 let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
                 let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
@@ -590,9 +721,28 @@ macro_rules! emit16o {
 // NOTE: no wrapping block — the `let` bindings must escape into the
 // caller's scope (a `{{ }}` body would scope them to the block).
 macro_rules! setup16 {
-    ($state:expr, $w:ident, $bc:ident, $ctr:ident,
-     $x0:ident, $x1:ident, $x2:ident, $x3:ident, $x4:ident, $x5:ident, $x6:ident, $x7:ident,
-     $x8:ident, $x9:ident, $x10:ident, $x11:ident, $x12:ident, $x13:ident, $x14:ident, $x15:ident) => {
+    (
+        $state:expr,
+        $w:ident,
+        $bc:ident,
+        $ctr:ident,
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {
         let $w = $state.words;
         let $bc = |i: usize| _mm512_set1_epi32($w[i] as i32);
         // x12 lane L = base + L; the other words are uniform across lanes.
@@ -616,22 +766,44 @@ macro_rules! setup16 {
 #[target_feature(enable = "avx512f")]
 #[inline(never)]
 pub(crate) unsafe fn xor_batch16(state: &mut State, buf: *mut u8) {
-    setup16!(state, w, bcast, ctr,
-        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    setup16!(
+        state, w, bcast, ctr, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
     // Fully unrolled: the rolled loop's back-edge broke LLVM's scheduling
     // of the 16 independent register chains.
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-    emit16!(buf, bcast, ctr,
-        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    emit16!(
+        buf, bcast, ctr, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
 }
 
 /// Fused seal bulk: loops [`xor_batch16_fused_seal`]'s interleave over the
@@ -685,8 +857,10 @@ pub(crate) unsafe fn xor_batch16_seal_bulk(
 
     while len - off >= 1024 && poly_off + 1024 <= off {
         let mut pptr = msg.add(poly_off);
-        reload16!(o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
-            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        reload16!(
+            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15, x0, x1, x2, x3,
+            x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
 
         macro_rules! poly_round {
             () => {{
@@ -699,29 +873,81 @@ pub(crate) unsafe fn xor_batch16_seal_bulk(
             }};
         }
 
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         let _ = pptr;
 
-        emit16o!(msg.add(off),
-            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
-            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        emit16o!(
+            msg.add(off),
+            o0,
+            o1,
+            o2,
+            o3,
+            o4,
+            o5,
+            o6,
+            o7,
+            o8,
+            o9,
+            o10,
+            o11,
+            ctr,
+            o13,
+            o14,
+            o15,
+            x0,
+            x1,
+            x2,
+            x3,
+            x4,
+            x5,
+            x6,
+            x7,
+            x8,
+            x9,
+            x10,
+            x11,
+            x12,
+            x13,
+            x14,
+            x15
+        );
         off += 1024;
         poly_off += 1024;
         iters += 1;
@@ -780,8 +1006,10 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
 
     while len - off >= 1024 && len - poly_off >= 1024 {
         let mut pptr = msg.add(poly_off);
-        reload16!(o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
-            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        reload16!(
+            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15, x0, x1, x2, x3,
+            x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
 
         macro_rules! poly_round {
             () => {{
@@ -794,29 +1022,81 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
             }};
         }
 
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         poly_round!();
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
-        dr16!(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+        dr16!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
         let _ = pptr;
 
-        emit16o!(msg.add(off),
-            o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, ctr, o13, o14, o15,
-            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+        emit16o!(
+            msg.add(off),
+            o0,
+            o1,
+            o2,
+            o3,
+            o4,
+            o5,
+            o6,
+            o7,
+            o8,
+            o9,
+            o10,
+            o11,
+            ctr,
+            o13,
+            o14,
+            o15,
+            x0,
+            x1,
+            x2,
+            x3,
+            x4,
+            x5,
+            x6,
+            x7,
+            x8,
+            x9,
+            x10,
+            x11,
+            x12,
+            x13,
+            x14,
+            x15
+        );
         off += 1024;
         poly_off += 1024;
         iters += 1;
@@ -831,9 +1111,9 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
 }
 
 /// Single-block (64-byte) kernel in XMM registers.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
-
     let p = state.words.as_ptr().cast::<__m128i>();
     let v0 = _mm_loadu_si128(p.add(0));
     let v1 = _mm_loadu_si128(p.add(1));
@@ -871,7 +1151,8 @@ pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     _mm_storeu_si128(buf.add(48).cast(), _mm_xor_si128(pt3, d));
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn quarter(a: &mut __m128i, b: &mut __m128i, c: &mut __m128i, d: &mut __m128i) {
     *a = _mm_add_epi32(*a, *b);
     *d = _mm_xor_si128(*d, *a);
@@ -890,7 +1171,8 @@ unsafe fn quarter(a: &mut __m128i, b: &mut __m128i, c: &mut __m128i, d: &mut __m
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let p = state.words.as_ptr().cast::<__m128i>();
     let v0 = _mm_loadu_si128(p.add(0));

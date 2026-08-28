@@ -45,7 +45,8 @@ struct Initialized {
 }
 
 impl Backend for Avx2Poly {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn init(key: &[u8; 32]) -> Self {
         let (k, r1) = prepare_keys(key);
         let r2 = PrecomputedMultiplier::from((Aligned130(r1.a) * r1).reduce());
@@ -59,7 +60,8 @@ impl Backend for Avx2Poly {
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_block(&mut self, block: &[u8; 16]) {
         if self.num_cached == 8 {
             // Cache full: this stream is long enough to amortize the
@@ -70,7 +72,8 @@ impl Backend for Avx2Poly {
         self.num_cached += 1;
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb4(&mut self, blocks: &[u8; 64]) {
         // The engine's alignment prologue guarantees the deferred cache
         // holds a multiple of 4 blocks (a 64-byte boundary).
@@ -80,7 +83,8 @@ impl Backend for Avx2Poly {
         self.advance(loaded);
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn pending_blocks(&self) -> usize {
         self.num_cached
     }
@@ -104,7 +108,8 @@ impl Backend for Avx2Poly {
         self.num_cached = 0;
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn finalize_into(&mut self, out: &mut [u8; 16]) {
         debug_assert!(self.num_cached <= 8);
         // P ← M·P then fold the four coefficients: P = T_0 + T_1 + T_2 + T_3.
@@ -151,7 +156,8 @@ impl Backend for Avx2Poly {
 }
 
 impl Avx2Poly {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn advance(&mut self, blocks: Aligned4x130) {
         if let Some(inner) = &mut self.initialized {
             // P ← R⁴·P + blocks
@@ -164,7 +170,8 @@ impl Avx2Poly {
 
     /// Fold the whole deferred cache into the streaming state, in order.
     /// `num_cached` must be a multiple of 4.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn drain_cache(&mut self) {
         debug_assert_eq!(self.num_cached % 4, 0);
         let mut i = 0;
@@ -178,7 +185,8 @@ impl Avx2Poly {
 }
 
 /// Derives the addition key and clamped polynomial key.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn prepare_keys(key: &[u8; 32]) -> (AdditionKey, PrecomputedMultiplier) {
     // [k7, k6, k5, k4, k3, k2, k1, k0]
     let key256 = _mm256_loadu_si256(key.as_ptr().cast());
@@ -213,7 +221,8 @@ struct Aligned130(__m256i);
 
 impl Aligned130 {
     /// Align a 16-byte block at 26-bit boundaries, high bit set.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn from_block(block: &[u8; 16]) -> Self {
         Aligned130::new(_mm256_or_si256(
             _mm256_and_si256(
@@ -225,7 +234,8 @@ impl Aligned130 {
     }
 
     /// Split a 130-bit integer (32-bit word layout) into five 26-bit limbs.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn new(x: __m256i) -> Self {
         let xl = _mm256_sllv_epi32(x, _mm256_set_epi32(32, 32, 32, 24, 18, 12, 6, 0));
         let xh = _mm256_permutevar8x32_epi32(
@@ -251,7 +261,8 @@ impl Aligned130 {
 impl core::ops::Add<Aligned130> for Aligned130 {
     type Output = Aligned130;
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn add(self, other: Aligned130) -> Aligned130 {
         // 26-bit limbs inside 32-bit words leave slack for unreduced adds
         unsafe { Aligned130(_mm256_add_epi32(self.0, other.0)) }
@@ -267,7 +278,8 @@ struct PrecomputedMultiplier {
 }
 
 impl From<Aligned130> for PrecomputedMultiplier {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn from(r: Aligned130) -> Self {
         unsafe {
             let a_5 = _mm256_permutevar8x32_epi32(
@@ -286,7 +298,8 @@ impl core::ops::Mul<PrecomputedMultiplier> for Aligned130 {
 
     /// 26-bit × 26-bit multiply with lazy reduction, switching to 64-bit
     /// accumulator lanes.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn mul(self, other: PrecomputedMultiplier) -> Unreduced130 {
         unsafe {
             let x = self.0;
@@ -356,7 +369,8 @@ struct Unreduced130 {
 
 impl Unreduced130 {
     /// Reduce modulo 2^130−5, back to 32-bit lanes.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn reduce(self) -> Aligned130 {
         unsafe {
             let (red_1, red_0) = adc(self.v1, self.v0);
@@ -372,7 +386,8 @@ impl Unreduced130 {
 }
 
 /// Carry chain: fold limb overflows upward.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn adc(v1: __m256i, v0: __m256i) -> (__m256i, __m256i) {
     let v0 = _mm256_add_epi64(
         _mm256_and_si256(
@@ -393,7 +408,8 @@ unsafe fn adc(v1: __m256i, v0: __m256i) -> (__m256i, __m256i) {
 }
 
 /// Fold the ≥2^130 part back via ×5.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn red(v1: __m256i, v0: __m256i) -> (__m256i, __m256i) {
     let t = _mm256_srlv_epi64(v1, _mm256_set_epi64x(64, 64, 64, 26));
     let red_0 = _mm256_add_epi64(_mm256_add_epi64(v0, t), _mm256_slli_epi64(t, 2));
@@ -408,7 +424,8 @@ struct Aligned2x130 {
 }
 
 impl Aligned2x130 {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn from_blocks(src: &[u8; 32]) -> Self {
         Aligned2x130 {
             v0: Aligned130::from_block(src[..16].try_into().unwrap()),
@@ -418,7 +435,8 @@ impl Aligned2x130 {
 
     /// Multiply both lanes by their respective r powers and sum, in one
     /// fused multiply tree.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn mul_and_sum(
         self,
         r1: PrecomputedMultiplier,
@@ -527,7 +545,8 @@ impl Aligned2x130 {
 impl core::ops::Add<Aligned130> for Aligned2x130 {
     type Output = Aligned2x130;
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn add(self, other: Aligned130) -> Aligned2x130 {
         Aligned2x130 {
             v0: self.v0 + other,
@@ -546,7 +565,8 @@ struct SpacedMultiplier4x130 {
 
 impl SpacedMultiplier4x130 {
     /// Returns `(multiplier, R⁴)` given `(R¹, R²)`.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn new(
         r1: PrecomputedMultiplier,
         r2: PrecomputedMultiplier,
@@ -584,7 +604,8 @@ struct Aligned4x130 {
 
 impl Aligned4x130 {
     /// Load 4 blocks (64 bytes), align to 26-bit limbs, set high bits.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn from_bytes(src: &[u8; 64]) -> Self {
         let blocks_01 = _mm256_loadu_si256(src[..32].as_ptr().cast());
         let blocks_23 = _mm256_loadu_si256(src[32..].as_ptr().cast());
@@ -619,7 +640,8 @@ impl Aligned4x130 {
 impl core::ops::Add<Aligned4x130> for Aligned4x130 {
     type Output = Aligned4x130;
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn add(self, other: Aligned4x130) -> Aligned4x130 {
         unsafe {
             Aligned4x130 {
@@ -636,7 +658,8 @@ impl core::ops::Mul<PrecomputedMultiplier> for &Aligned4x130 {
 
     /// The hot loop: four 130-bit multiplies by the same multiplier in one
     /// instruction tree (≈18 `vpmuludq` per 64 bytes).
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn mul(self, other: PrecomputedMultiplier) -> Unreduced4x130 {
         unsafe {
             let mut x = *self;
@@ -707,7 +730,8 @@ impl core::ops::Mul<SpacedMultiplier4x130> for Aligned4x130 {
     type Output = Unreduced4x130;
 
     /// Finalization: multiply the four coefficients by R¹..R⁴ respectively.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn mul(self, m: SpacedMultiplier4x130) -> Unreduced4x130 {
         unsafe {
             let mut x = self;
@@ -803,7 +827,8 @@ struct Unreduced4x130 {
 // NOTE: free fns, not closures — LLVM used to outline the closures into
 // non-target-feature symbols, turning the intrinsics inside into out-of-line
 // calls on the hot absorb4 path.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn adc4(x1: __m256i, x0: __m256i) -> (__m256i, __m256i) {
     let mask_26 = _mm256_set1_epi64x(0x03ff_ffff);
     let y1 = _mm256_add_epi64(x1, _mm256_srli_epi64(x0, 26));
@@ -812,7 +837,8 @@ unsafe fn adc4(x1: __m256i, x0: __m256i) -> (__m256i, __m256i) {
 }
 
 /// Fold the ≥2^130 part back via ×5 (4-wide variant of [`red`]).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn red4(x4: __m256i, x0: __m256i) -> (__m256i, __m256i) {
     let mask_26 = _mm256_set1_epi64x(0x03ff_ffff);
     let y0 = _mm256_add_epi64(
@@ -824,7 +850,8 @@ unsafe fn red4(x4: __m256i, x0: __m256i) -> (__m256i, __m256i) {
 }
 
 impl Unreduced4x130 {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn reduce(self) -> Aligned4x130 {
         unsafe {
             let x = self;
@@ -846,7 +873,8 @@ impl Unreduced4x130 {
     }
 
     /// Sum the four coefficients (used at finalization).
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn sum(self) -> Unreduced130 {
         unsafe {
             let x = self;
@@ -876,10 +904,12 @@ impl core::ops::Add<Aligned130> for AdditionKey {
     type Output = IntegerTag;
 
     /// `(x + k) mod 2^128` with full carry handling.
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn add(self, x: Aligned130) -> IntegerTag {
         unsafe {
-            #[inline(always)]
+            #[cfg_attr(debug_assertions, inline)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
             unsafe fn propagate_carry(x: __m256i) -> __m256i {
                 let t = _mm256_permutevar8x32_epi32(
                     _mm256_srli_epi32(x, 26),
@@ -909,7 +939,8 @@ impl core::ops::Add<Aligned130> for AdditionKey {
                 )
             }
 
-            #[inline(always)]
+            #[cfg_attr(debug_assertions, inline)]
+            #[cfg_attr(not(debug_assertions), inline(always))]
             unsafe fn propagate_carry_32(x: __m256i) -> __m256i {
                 _mm256_add_epi64(
                     _mm256_and_si256(x, _mm256_set_epi32(0, -1, 0, -1, 0, -1, 0, -1)),
@@ -974,7 +1005,8 @@ impl core::ops::Add<Aligned130> for AdditionKey {
 }
 
 impl From<AdditionKey> for IntegerTag {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn from(k: AdditionKey) -> Self {
         unsafe {
             IntegerTag(_mm256_castsi256_si128(_mm256_permutevar8x32_epi32(
@@ -988,7 +1020,8 @@ impl From<AdditionKey> for IntegerTag {
 struct IntegerTag(__m128i);
 
 impl IntegerTag {
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     fn write(self, tag: &mut [u8; 16]) {
         unsafe { _mm_storeu_si128(tag.as_mut_ptr().cast(), self.0) }
     }

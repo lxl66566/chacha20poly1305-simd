@@ -17,18 +17,21 @@ impl Ops for Sse2Ops {
 
     const CHACHA_BATCH: usize = crate::chacha::sse2::BATCH_BLOCKS;
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
         debug_assert_eq!(b1.len(), BLOCK);
         crate::chacha::sse2::gen_key_xor2(state, key_out, b1.try_into().unwrap());
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
         crate::chacha::sse2::gen_ks_small(state, key_out, ks);
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]) {
         let mut off = 0usize;
         while buf.len() - off >= 256 {
@@ -50,7 +53,8 @@ impl Ops for Sse2Ops {
         }
     }
 
-    #[inline(always)]
+    #[cfg_attr(debug_assertions, inline)]
+    #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         debug_assert_eq!(buf.len(), 256);
         crate::chacha::sse2::xor_batch4(state, buf.as_mut_ptr());

@@ -14,7 +14,8 @@ use crate::chacha::{BLOCK, State};
 /// Blocks per bulk batch (4 quads × 2).
 pub(crate) const BATCH_BLOCKS: usize = 8;
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rol16_mask() -> __m256i {
     _mm256_set_epi64x(
         0x0d0c_0f0e_0908_0b0a,
@@ -24,7 +25,8 @@ unsafe fn rol16_mask() -> __m256i {
     )
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rol8_mask() -> __m256i {
     _mm256_set_epi64x(
         0x0e0d_0c0f_0a09_080b,
@@ -34,7 +36,8 @@ unsafe fn rol8_mask() -> __m256i {
     )
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rows(state: &State) -> [__m256i; 3] {
     let p = state.words.as_ptr().cast::<__m128i>();
     [
@@ -44,7 +47,8 @@ unsafe fn rows(state: &State) -> [__m256i; 3] {
     ]
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn ctr_row(state: &State, base: u32, k: usize) -> __m256i {
     let w = state.words;
     let c0 = base.wrapping_add(2 * k as u32);
@@ -103,7 +107,8 @@ macro_rules! to_rows {
 
 /// Full 20 rounds + feed-forward add on 4 quads (8 blocks), state held in
 /// 16 explicit locals so it stays in registers.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
     let m16 = rol16_mask();
     let m8 = rol8_mask();
@@ -158,7 +163,8 @@ unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
 }
 
 /// Single-quad (2-block) variant of [`rounds4`].
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
     let m16 = rol16_mask();
     let m8 = rol8_mask();
@@ -179,7 +185,8 @@ unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
 
 /// Two-quad (4-block) variant of [`rounds4`] — the OpenSSL 4x ladder tier
 /// for 256..511-byte tails.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
     let m16 = rol16_mask();
     let m8 = rol8_mask();
@@ -211,7 +218,8 @@ unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
     ]
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_xor_quad(quad: &[__m256i; 4], mut buf: *mut u8) {
     let [a, b, c, d] = *quad;
     for blk in 0..2 {
@@ -232,7 +240,8 @@ unsafe fn emit_xor_quad(quad: &[__m256i; 4], mut buf: *mut u8) {
 }
 
 /// Generate 8 keystream blocks and XOR them into `buf` (512 bytes).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
     let v = rows(state);
     let base = state.words[12];
@@ -252,7 +261,8 @@ pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
 }
 
 /// Four-block (256-byte) batch — 2 interleaved quads in one kernel call.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad2(state: &mut State, buf: *mut u8) {
     let v = rows(state);
     let base = state.words[12];
@@ -267,7 +277,8 @@ pub(crate) unsafe fn xor_quad2(state: &mut State, buf: *mut u8) {
 }
 
 /// Two-block (128-byte) batch.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad(state: &mut State, buf: *mut u8) {
     let v = rows(state);
     let c = ctr_row(state, state.words[12], 0);
@@ -279,7 +290,8 @@ pub(crate) unsafe fn xor_quad(state: &mut State, buf: *mut u8) {
 /// Fused prologue: blocks 0 and 1 in one quad call — block 0's first 32
 /// bytes (the Poly1305 one-time key) to `key_out`, block 1's keystream
 /// XORed into `b1` (a zeroed buffer yields the raw keystream).
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let v = rows(state);
     let c = ctr_row(state, state.words[12], 0);
@@ -315,7 +327,8 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 /// `ceil(msg_len / BLOCK) * BLOCK`, 0 for an empty message). Advances the
 /// counter by `1 + ks.len() / BLOCK`; the engine XORs `ks` into the
 /// message at whichever pipeline stage the MAC ordering requires.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
     if ks.is_empty() {
@@ -370,7 +383,8 @@ pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks:
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     // one quad (2 blocks), second block discarded
     let v = rows(state);
@@ -383,7 +397,8 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
 }
 
 /// Single-block (64-byte) kernel: one block in XMM registers, AVX2 rotations.
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     let p = state.words.as_ptr().cast::<__m128i>();
     let v0 = _mm_loadu_si128(p.add(0));
@@ -421,7 +436,8 @@ pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     _mm_storeu_si128(buf.add(48).cast(), _mm_xor_si128(pt3, d));
 }
 
-#[inline(always)]
+#[cfg_attr(debug_assertions, inline)]
+#[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn quarter_xmm(
     a: &mut __m128i,
     b: &mut __m128i,
