@@ -10,7 +10,7 @@ use chacha20poly1305_simd::{
 };
 use rustcrypto::aead::{AeadInOut, KeyInit};
 
-const KEY: &[u8; 32] = &[
+const KEY: Key = [
     0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
     0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
 ];
@@ -200,11 +200,11 @@ fn wycheproof() {
             let key: Key = key.try_into().unwrap();
             if is_xchacha {
                 let nonce: XNonce = nonce.try_into().unwrap();
-                let _cipher = XChaCha20Poly1305::new(&key);
+                let _cipher = XChaCha20Poly1305::new(key);
                 // split ct || tag
                 let (ct_body, tag) = ct.split_at(ct.len() - 16);
                 let tag: &Tag = tag.try_into().unwrap();
-                let cipher = XChaCha20Poly1305::new(&key);
+                let cipher = XChaCha20Poly1305::new(key);
                 let mut buf = msg.to_vec();
                 let computed = cipher
                     .encrypt_in_place_detached(&nonce, aad, &mut buf)
@@ -221,7 +221,7 @@ fn wycheproof() {
                 let nonce: Nonce = nonce.try_into().unwrap();
                 let (ct_body, tag) = ct.split_at(ct.len() - 16);
                 let tag: &Tag = tag.try_into().unwrap();
-                let cipher = ChaCha20Poly1305::new(&key);
+                let cipher = ChaCha20Poly1305::new(key);
                 let mut buf = msg.to_vec();
                 let computed = cipher
                     .encrypt_in_place_detached(&nonce, aad, &mut buf)
@@ -264,7 +264,7 @@ fn differential_vs_rustcrypto() {
         key[i * 8..][..8].copy_from_slice(&next().to_le_bytes());
     }
 
-    let cipher = ChaCha20Poly1305::new(&key);
+    let cipher = ChaCha20Poly1305::new(key);
     let rc = rustcrypto::ChaCha20Poly1305::new(&rustcrypto::Key::from(key));
     let mut nonce_bytes = [0u8; 12];
     nonce_bytes[..8].copy_from_slice(&next().to_le_bytes());

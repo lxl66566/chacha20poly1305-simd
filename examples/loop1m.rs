@@ -9,7 +9,7 @@ fn main() {
     let key = [0x24u8; 32];
     let nonce = [0x42u8; 12];
     let aad = [0xaau8; 16];
-    let c = ChaCha20Poly1305::new(&key);
+    let c = ChaCha20Poly1305::new(key);
     let mut buf = vec![0u8; 1 << 20];
     let t0 = std::time::Instant::now();
     let mut n = 0u64;

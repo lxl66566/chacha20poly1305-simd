@@ -64,7 +64,7 @@ fn check(case: usize, r: &mut Rng) {
     let msg: Vec<u8> = (0..pick_len(r)).map(|_| r.byte()).collect();
     let corrupt = r.next() as u32;
 
-    let ours = ChaCha20Poly1305::new(&key);
+    let ours = ChaCha20Poly1305::new(key);
     let theirs = rustcrypto::ChaCha20Poly1305::new(&rustcrypto::Key::from(key));
 
     let mut ours_buf = msg.clone();
@@ -115,7 +115,7 @@ fn check(case: usize, r: &mut Rng) {
     }
 
     // XChaCha20 path (HChaCha20 subkey included)
-    let ours_x = XChaCha20Poly1305::new(&key);
+    let ours_x = XChaCha20Poly1305::new(key);
     let theirs_x = rustcrypto::XChaCha20Poly1305::new(&rustcrypto::Key::from(key));
     let ct_ours = ours_x
         .encrypt(&xnonce, Payload {

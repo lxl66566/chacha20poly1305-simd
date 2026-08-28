@@ -33,7 +33,7 @@ fn corrupt_split(corrupt: u32, lhs: &mut [u8], rhs: &mut [u8]) {
 }
 
 fn check(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], msg: &[u8], corrupt: u32) {
-    let ours = ChaCha20Poly1305::new(key);
+    let ours = ChaCha20Poly1305::new(*key);
     let theirs = rustcrypto::ChaCha20Poly1305::new(&rustcrypto::Key::from(*key));
 
     // seal: ciphertext and tag must match the reference exactly
@@ -54,7 +54,8 @@ fn check(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], msg: &[u8], corrupt: u32)
 
     // open: valid tag must decrypt to the original message
     let mut dec = ours_buf.clone();
-    ours.decrypt_in_place_detached(nonce, aad, &mut dec, &tag).unwrap();
+    ours.decrypt_in_place_detached(nonce, aad, &mut dec, &tag)
+        .unwrap();
     assert_eq!(dec, msg, "roundtrip mismatch");
 
     // open: differential verdict on a corrupted (aad, ct) pair. Both
@@ -75,7 +76,7 @@ fn check(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], msg: &[u8], corrupt: u32)
     );
     match (ours_ok, their_ok) {
         (Ok(()), Ok(())) => assert_eq!(ours_dec, their_dec, "open plaintext mismatch"),
-        (Err(_), Err(_)) => {}
+        (Err(_), Err(_)) => {},
         (o, t) => panic!("open verdict mismatch: ours={o:?} theirs={t:?}"),
     }
 
@@ -83,28 +84,46 @@ fn check(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], msg: &[u8], corrupt: u32)
     let mut bad_tag = tag;
     bad_tag[0] ^= 1;
     let mut dec = ours_buf;
-    assert!(ours.decrypt_in_place_detached(nonce, aad, &mut dec, &bad_tag).is_err());
+    assert!(
+        ours.decrypt_in_place_detached(nonce, aad, &mut dec, &bad_tag)
+            .is_err()
+    );
 }
 
 fuzz_target!(|input: Input| {
-    check(&input.key, &input.nonce, &input.aad, &input.msg, input.corrupt);
+    check(
+        &input.key,
+        &input.nonce,
+        &input.aad,
+        &input.msg,
+        input.corrupt,
+    );
 
     // XChaCha20-Poly1305 path (HChaCha20 subkey derivation included)
-    let ours_x = XChaCha20Poly1305::new(&input.key);
+    let ours_x = XChaCha20Poly1305::new(input.key);
     let theirs_x = rustcrypto::XChaCha20Poly1305::new(&rustcrypto::Key::from(input.key));
     let ct_ours = ours_x
-        .encrypt(&input.xnonce, Payload { msg: &input.msg, aad: &input.aad })
+        .encrypt(&input.xnonce, Payload {
+            msg: &input.msg,
+            aad: &input.aad,
+        })
         .unwrap();
     let ct_theirs = theirs_x
         .encrypt(
             &rustcrypto::XNonce::from(input.xnonce),
-            rustcrypto::aead::Payload { msg: &input.msg, aad: &input.aad },
+            rustcrypto::aead::Payload {
+                msg: &input.msg,
+                aad: &input.aad,
+            },
         )
         .unwrap();
     assert_eq!(ct_ours, ct_theirs, "xchacha ciphertext mismatch");
     assert_eq!(
         ours_x
-            .decrypt(&input.xnonce, Payload { msg: &ct_ours, aad: &input.aad })
+            .decrypt(&input.xnonce, Payload {
+                msg: &ct_ours,
+                aad: &input.aad
+            })
             .unwrap(),
         input.msg,
         "xchacha roundtrip mismatch"
@@ -117,14 +136,20 @@ fuzz_target!(|input: Input| {
     if let Some(byte) = ct_bad.get_mut(idx) {
         *byte ^= 1;
     }
-    let ours_v = ours_x.decrypt(&input.xnonce, Payload { msg: &ct_bad, aad: &input.aad });
+    let ours_v = ours_x.decrypt(&input.xnonce, Payload {
+        msg: &ct_bad,
+        aad: &input.aad,
+    });
     let theirs_v = theirs_x.decrypt(
         &rustcrypto::XNonce::from(input.xnonce),
-        rustcrypto::aead::Payload { msg: &ct_bad, aad: &input.aad },
+        rustcrypto::aead::Payload {
+            msg: &ct_bad,
+            aad: &input.aad,
+        },
     );
     match (ours_v, theirs_v) {
         (Ok(o), Ok(t)) => assert_eq!(o, t, "xchacha open plaintext mismatch"),
-        (Err(_), Err(_)) => {}
+        (Err(_), Err(_)) => {},
         (o, t) => panic!("xchacha open verdict mismatch: ours={o:?} theirs={t:?}"),
     }
 });

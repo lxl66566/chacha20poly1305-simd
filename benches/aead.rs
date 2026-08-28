@@ -81,7 +81,7 @@ fn bench_seal(c: &mut Criterion) {
     let key = [0x24u8; 32];
     let nonce = [0x42u8; 12];
     let aad = [0xaau8; 16];
-    let ours = ChaCha20Poly1305::new(&key);
+    let ours = ChaCha20Poly1305::new(key);
     let theirs = RcCipher::new(&rustcrypto::Key::from(key));
     let rnonce = rustcrypto::Nonce::from(nonce);
 
@@ -130,7 +130,7 @@ fn bench_open(c: &mut Criterion) {
     let key = [0x24u8; 32];
     let nonce = [0x42u8; 12];
     let aad = [0xaau8; 16];
-    let ours = ChaCha20Poly1305::new(&key);
+    let ours = ChaCha20Poly1305::new(key);
     let mut buf = vec![0u8; 1 << 20];
     let tag = ours
         .encrypt_in_place_detached(&nonce, &aad, &mut buf)
@@ -166,7 +166,7 @@ fn bench_xchacha(c: &mut Criterion) {
     let key = [0x24u8; 32];
     let xnonce = [0x42u8; 24];
     let aad = [0xaau8; 16];
-    let ours = XChaCha20Poly1305::new(&key);
+    let ours = XChaCha20Poly1305::new(key);
     let theirs = RcXCipher::new(&rustcrypto::Key::from(key));
     let rxnonce = rustcrypto::XNonce::from(xnonce);
 
@@ -204,7 +204,7 @@ fn bench_alloc_api(c: &mut Criterion) {
     // Real-world allocation level: Vec in, Vec out.
     let key = [0x24u8; 32];
     let nonce = [0x42u8; 12];
-    let ours = ChaCha20Poly1305::new(&key);
+    let ours = ChaCha20Poly1305::new(key);
     let theirs = RcCipher::new(&rustcrypto::Key::from(key));
     let rnonce = rustcrypto::Nonce::from(nonce);
     let pt = vec![0u8; 1 << 20];

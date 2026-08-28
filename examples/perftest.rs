@@ -2,7 +2,7 @@ use chacha20poly1305_simd::{ChaCha20Poly1305, active_backend};
 
 fn main() {
     println!("backend: {}", active_backend());
-    let cipher = ChaCha20Poly1305::new(&[0x42u8; 32]);
+    let cipher = ChaCha20Poly1305::new([0x42u8; 32]);
     let nonce = [7u8; 12];
     let mut buf = vec![0u8; 1024];
     // warm

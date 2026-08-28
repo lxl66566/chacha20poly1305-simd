@@ -38,7 +38,7 @@
 //!
 //! let key = [0x42u8; 32];
 //! let nonce = [7u8; 12];
-//! let cipher = ChaCha20Poly1305::new(&key);
+//! let cipher = ChaCha20Poly1305::new(key);
 //!
 //! let mut buffer = *b"hello world";
 //! let tag: Tag = cipher
@@ -58,7 +58,7 @@
 #![cfg_attr(feature = "alloc", doc = "```")]
 #![cfg_attr(not(feature = "alloc"), doc = "```ignore")]
 //! # use chacha20poly1305_simd::{Payload, XChaCha20Poly1305, XNonce};
-//! let cipher = XChaCha20Poly1305::new(&[1u8; 32]);
+//! let cipher = XChaCha20Poly1305::new([1u8; 32]);
 //! let nonce = [2u8; 24];
 //! // no AAD:
 //! let ct = cipher.encrypt(&nonce, b"secret payload".as_ref()).unwrap();
@@ -83,7 +83,7 @@
 #![cfg_attr(feature = "getrandom", doc = "```")]
 #![cfg_attr(not(feature = "getrandom"), doc = "```ignore")]
 //! # use chacha20poly1305_simd::{ChaCha20Poly1305, Generate, Key, Nonce};
-//! let cipher = ChaCha20Poly1305::new(&Key::generate());
+//! let cipher = ChaCha20Poly1305::new(Key::generate());
 //! let nonce = Nonce::generate();
 //! # let _ = cipher;
 //! # let _ = nonce;
@@ -253,8 +253,8 @@ pub struct ChaCha20Poly1305 {
 impl ChaCha20Poly1305 {
     /// Create a new cipher instance from a 256-bit key.
     #[must_use]
-    pub const fn new(key: &Key) -> Self {
-        Self { key: *key }
+    pub const fn new(key: Key) -> Self {
+        Self { key }
     }
 
     /// Derive the ChaCha20 state used to seal / open `nonce` (counter = 0).
@@ -414,8 +414,8 @@ pub struct XChaCha20Poly1305 {
 impl XChaCha20Poly1305 {
     /// Create a new cipher instance from a 256-bit key.
     #[must_use]
-    pub const fn new(key: &Key) -> Self {
-        Self { key: *key }
+    pub const fn new(key: Key) -> Self {
+        Self { key }
     }
 
     #[cfg(feature = "alloc")]
@@ -425,11 +425,10 @@ impl XChaCha20Poly1305 {
         nonce: &XNonce,
         payload: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
-        #[allow(unused_mut)] // mut needed only under `zeroize`
-        let (mut key, iv) = self.subkey(nonce);
-        let cipher = ChaCha20Poly1305::new(&key);
-        #[cfg(feature = "zeroize")]
-        zeroize::Zeroize::zeroize(&mut key);
+        // The subkey is moved into the cipher, which zeroizes it on drop
+        // under the `zeroize` feature.
+        let (key, iv) = self.subkey(nonce);
+        let cipher = ChaCha20Poly1305::new(key);
         cipher.encrypt(&iv, payload)
     }
 
@@ -440,11 +439,10 @@ impl XChaCha20Poly1305 {
         nonce: &XNonce,
         ciphertext_and_tag: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
-        #[allow(unused_mut)] // mut needed only under `zeroize`
-        let (mut key, iv) = self.subkey(nonce);
-        let cipher = ChaCha20Poly1305::new(&key);
-        #[cfg(feature = "zeroize")]
-        zeroize::Zeroize::zeroize(&mut key);
+        // The subkey is moved into the cipher, which zeroizes it on drop
+        // under the `zeroize` feature.
+        let (key, iv) = self.subkey(nonce);
+        let cipher = ChaCha20Poly1305::new(key);
         cipher.decrypt(&iv, ciphertext_and_tag)
     }
 
@@ -455,11 +453,10 @@ impl XChaCha20Poly1305 {
         aad: &[u8],
         msg: &mut [u8],
     ) -> Result<Tag, Error> {
-        #[allow(unused_mut)] // mut needed only under `zeroize`
-        let (mut key, iv) = self.subkey(nonce);
-        let cipher = ChaCha20Poly1305::new(&key);
-        #[cfg(feature = "zeroize")]
-        zeroize::Zeroize::zeroize(&mut key);
+        // The subkey is moved into the cipher, which zeroizes it on drop
+        // under the `zeroize` feature.
+        let (key, iv) = self.subkey(nonce);
+        let cipher = ChaCha20Poly1305::new(key);
         cipher.encrypt_in_place_detached(&iv, aad, msg)
     }
 
@@ -471,11 +468,10 @@ impl XChaCha20Poly1305 {
         buf: &mut [u8],
         tag: &Tag,
     ) -> Result<(), Error> {
-        #[allow(unused_mut)] // mut needed only under `zeroize`
-        let (mut key, iv) = self.subkey(nonce);
-        let cipher = ChaCha20Poly1305::new(&key);
-        #[cfg(feature = "zeroize")]
-        zeroize::Zeroize::zeroize(&mut key);
+        // The subkey is moved into the cipher, which zeroizes it on drop
+        // under the `zeroize` feature.
+        let (key, iv) = self.subkey(nonce);
+        let cipher = ChaCha20Poly1305::new(key);
         cipher.decrypt_in_place_detached(&iv, aad, buf, tag)
     }
 
