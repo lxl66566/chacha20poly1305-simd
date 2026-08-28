@@ -9,7 +9,7 @@
 // only the low bits are wanted.
 #![allow(clippy::cast_possible_truncation)]
 
-use chacha20poly1305_simd::{ChaCha20Poly1305, XChaCha20Poly1305};
+use chacha20poly1305_simd::{ChaCha20Poly1305, Payload, XChaCha20Poly1305};
 use rustcrypto::aead::{Aead, AeadInOut, KeyInit};
 
 /// xorshift64* — deterministic across hosts so failures are reproducible.
@@ -117,7 +117,12 @@ fn check(case: usize, r: &mut Rng) {
     // XChaCha20 path (HChaCha20 subkey included)
     let ours_x = XChaCha20Poly1305::new(&key);
     let theirs_x = rustcrypto::XChaCha20Poly1305::new(&rustcrypto::Key::from(key));
-    let ct_ours = ours_x.encrypt(&xnonce, &aad, &msg).unwrap();
+    let ct_ours = ours_x
+        .encrypt(&xnonce, Payload {
+            msg: &msg,
+            aad: &aad,
+        })
+        .unwrap();
     let ct_theirs = theirs_x
         .encrypt(
             &rustcrypto::XNonce::from(xnonce),
@@ -129,7 +134,12 @@ fn check(case: usize, r: &mut Rng) {
         .unwrap();
     assert_eq!(ct_ours, ct_theirs, "xchacha ct mismatch (case {case})");
     assert_eq!(
-        ours_x.decrypt(&xnonce, &aad, &ct_ours).unwrap(),
+        ours_x
+            .decrypt(&xnonce, Payload {
+                msg: &ct_ours,
+                aad: &aad
+            })
+            .unwrap(),
         msg,
         "xchacha roundtrip mismatch (case {case})"
     );

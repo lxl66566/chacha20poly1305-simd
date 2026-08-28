@@ -4,7 +4,7 @@
 
 #![no_main]
 
-use chacha20poly1305_simd::{ChaCha20Poly1305, XChaCha20Poly1305};
+use chacha20poly1305_simd::{ChaCha20Poly1305, Payload, XChaCha20Poly1305};
 use libfuzzer_sys::fuzz_target;
 use rustcrypto::aead::{Aead, AeadInOut, KeyInit};
 
@@ -92,7 +92,9 @@ fuzz_target!(|input: Input| {
     // XChaCha20-Poly1305 path (HChaCha20 subkey derivation included)
     let ours_x = XChaCha20Poly1305::new(&input.key);
     let theirs_x = rustcrypto::XChaCha20Poly1305::new(&rustcrypto::Key::from(input.key));
-    let ct_ours = ours_x.encrypt(&input.xnonce, &input.aad, &input.msg).unwrap();
+    let ct_ours = ours_x
+        .encrypt(&input.xnonce, Payload { msg: &input.msg, aad: &input.aad })
+        .unwrap();
     let ct_theirs = theirs_x
         .encrypt(
             &rustcrypto::XNonce::from(input.xnonce),
@@ -101,7 +103,9 @@ fuzz_target!(|input: Input| {
         .unwrap();
     assert_eq!(ct_ours, ct_theirs, "xchacha ciphertext mismatch");
     assert_eq!(
-        ours_x.decrypt(&input.xnonce, &input.aad, &ct_ours).unwrap(),
+        ours_x
+            .decrypt(&input.xnonce, Payload { msg: &ct_ours, aad: &input.aad })
+            .unwrap(),
         input.msg,
         "xchacha roundtrip mismatch"
     );
@@ -113,7 +117,7 @@ fuzz_target!(|input: Input| {
     if let Some(byte) = ct_bad.get_mut(idx) {
         *byte ^= 1;
     }
-    let ours_v = ours_x.decrypt(&input.xnonce, &input.aad, &ct_bad);
+    let ours_v = ours_x.decrypt(&input.xnonce, Payload { msg: &ct_bad, aad: &input.aad });
     let theirs_v = theirs_x.decrypt(
         &rustcrypto::XNonce::from(input.xnonce),
         rustcrypto::aead::Payload { msg: &ct_bad, aad: &input.aad },

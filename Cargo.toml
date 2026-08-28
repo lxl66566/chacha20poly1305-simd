@@ -30,8 +30,9 @@ harness = false
 name    = "aead"
 
 [dependencies]
-hotpath = { version = "0.24", optional = true }
-zeroize = { version = "1.8", default-features = false, optional = true }
+getrandom = { version = "0.4", default-features = false, optional = true }
+hotpath   = { version = "0.24", optional = true }
+zeroize   = { version = "1.8", default-features = false, optional = true }
 
 [dev-dependencies]
 blobby     = { version = "0.4", features = ["alloc"] }
@@ -40,15 +41,17 @@ criterion  = "0.8"
 rustcrypto = { package = "chacha20poly1305", version = "0.11" }
 
 [features]
-default = ["alloc", "avx512", "std"]
-alloc   = []
+default   = ["alloc", "avx512", "std"]
+alloc     = []
 # Compile the x86-64 AVX-512 backend. Disable via `default-features = false` to
 # keep AVX-512 instructions out of the binary.
-avx512  = []
-hotpath = ["dep:hotpath", "hotpath/hotpath", "std"]
-std     = ["alloc"]
+avx512    = []
+# Random key/nonce generation via `Generate::generate()`.
+getrandom = ["dep:getrandom"]
+hotpath   = ["dep:hotpath", "hotpath/hotpath", "std"]
+std       = ["alloc"]
 # Zeroize secret key material (cipher key, Poly1305 key/state) on drop.
-zeroize = ["dep:zeroize"]
+zeroize   = ["dep:zeroize"]
 
 [lints.clippy]
 all                     = { level = "warn", priority = -1 }

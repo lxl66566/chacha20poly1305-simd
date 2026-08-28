@@ -27,27 +27,45 @@ cipher
 assert_eq!(&buffer, b"hello world");
 ```
 
-Allocating variants append / verify a 16-byte tag at the end of the ciphertext, matching the upstream wire format:
+Allocating variants append / verify a 16-byte tag at the end of the ciphertext, matching the upstream wire format. AAD is optional:
 
 ```rust
-use chacha20poly1305_simd::{XChaCha20Poly1305, XNonce};
+use chacha20poly1305_simd::{Payload, XChaCha20Poly1305, XNonce};
 
 let cipher = XChaCha20Poly1305::new(&[1u8; 32]);
 let nonce = [2u8; 24];
-let ct = cipher.encrypt(&nonce, b"header", b"secret payload");
+let ct = cipher.encrypt(&nonce, b"secret payload").unwrap();
 assert_eq!(ct.len(), b"secret payload".len() + 16);
-assert_eq!(cipher.decrypt(&nonce, b"header", &ct).unwrap(), b"secret payload");
+assert_eq!(cipher.decrypt(&nonce, &ct).unwrap(), b"secret payload");
+
+let ct = cipher
+    .encrypt(&nonce, Payload { msg: b"secret payload", aad: b"header" })
+    .unwrap();
+assert_eq!(
+    cipher.decrypt(&nonce, Payload { msg: &ct, aad: b"header" }).unwrap(),
+    b"secret payload"
+);
+```
+
+Keys and nonces can be generated from the OS CSPRNG with the `getrandom` feature (default on):
+
+```rust
+use chacha20poly1305_simd::{ChaCha20Poly1305, Generate, Key, Nonce};
+
+let cipher = ChaCha20Poly1305::new(&Key::generate());
+let nonce = Nonce::generate();
 ```
 
 ## Features
 
-| feature   | default | description                                        |
-| --------- | ------- | -------------------------------------------------- |
-| `avx512`  | ✓       | x86-64 AVX-512 backend                             |
-| `std`     | ✓       | runtime CPU detection (otherwise scalar backend)   |
-| `alloc`   | ✓       | allocating API                                     |
-| `zeroize` | –       | zeroize keys and intermediate secrets on drop      |
-| `hotpath` | –       | [hotpath](https://crates.io/crates/hotpath) probes |
+| feature     | default | description                                        |
+| ----------- | ------- | -------------------------------------------------- |
+| `avx512`    | ✓       | x86-64 AVX-512 backend                             |
+| `std`       | ✓       | runtime CPU detection (otherwise scalar backend)   |
+| `alloc`     | ✓       | allocating API                                     |
+| `getrandom` | ✓       | `Key`/`Nonce` random generation via `Generate`     |
+| `zeroize`   | –       | zeroize keys and intermediate secrets on drop      |
+| `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes |
 
 ## Backend selection
 

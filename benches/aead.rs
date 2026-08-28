@@ -18,7 +18,7 @@ use chacha20poly1305_simd::{ChaCha20Poly1305, XChaCha20Poly1305, active_backend}
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use rustcrypto::{
     ChaCha20Poly1305 as RcCipher, XChaCha20Poly1305 as RcXCipher,
-    aead::{Aead, AeadInOut, KeyInit, Payload},
+    aead::{Aead, AeadInOut, KeyInit, Payload as RcPayload},
 };
 
 /// Label for our side: the forced backend name, or the probed one in auto mode.
@@ -157,7 +157,7 @@ fn bench_xchacha(c: &mut Criterion) {
                 |b| {
                     let _ = black_box(theirs.encrypt(
                         black_box(&rxnonce),
-                        black_box(Payload { msg: &b, aad: &aad }),
+                        black_box(RcPayload { msg: &b, aad: &aad }),
                     ));
                 },
                 BatchSize::LargeInput,
@@ -180,13 +180,13 @@ fn bench_alloc_api(c: &mut Criterion) {
     let mut group = c.benchmark_group("alloc/chacha20poly1305");
     group.throughput(Throughput::Bytes(pt.len() as u64));
     group.bench_function(format!("{ours_tag}/1MiB"), |b| {
-        b.iter(|| black_box(ours.encrypt(black_box(&nonce), b"", black_box(&pt))));
+        b.iter(|| black_box(ours.encrypt(black_box(&nonce), black_box(pt.as_slice()))));
     });
     group.bench_function(format!("{rc_tag}/1MiB"), |b| {
         b.iter(|| {
             black_box(theirs.encrypt(
                 black_box(&rnonce),
-                black_box(Payload { msg: &pt, aad: b"" }),
+                black_box(RcPayload { msg: &pt, aad: b"" }),
             ))
         });
     });

@@ -22,13 +22,14 @@
 //!
 //! # Features
 //!
-//! | feature   | default | description                                                      |
-//! | --------- | ------- | ---------------------------------------------------------------- |
-//! | `std`     | ✓       | runtime CPU detection (otherwise compile-time `target_feature`s) |
-//! | `alloc`   | ✓       | allocating API                                                   |
-//! | `avx512`  | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
-//! | `zeroize` | –       | zeroize keys and intermediate secrets on drop                    |
-//! | `hotpath` | –       | [hotpath](https://crates.io/crates/hotpath) probes               |
+//! | feature     | default | description                                                       |
+//! | ----------- | ------- | ----------------------------------------------------------------- |
+//! | `std`       | ✓       | runtime CPU detection (otherwise compile-time `target_feature`s)  |
+//! | `alloc`     | ✓       | allocating API                                                    |
+//! | `avx512`    | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
+//! | `getrandom` | ✓       | `Key`/`Nonce` random generation via [`Generate`]                  |
+//! | `zeroize`   | –       | zeroize keys and intermediate secrets on drop                     |
+//! | `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes                |
 //!
 //! # Usage
 //!
@@ -51,23 +52,43 @@
 //! assert_eq!(&buffer, b"hello world");
 //! ```
 //!
-//! Allocated variants appends / expects the 16-byte tag at the end of the
-//! buffer, mirroring the upstream crate's wire format:
-//!
-//! ```
-//! # use chacha20poly1305_simd::{XChaCha20Poly1305, XNonce};
+//! Allocated variants append / expect the 16-byte tag at the end of the
+//! buffer, mirroring the upstream crate's wire format. AAD is optional — a
+//! bare `&[u8]` message auto-coerces into a [`Payload`] with empty AAD:
+#![cfg_attr(feature = "alloc", doc = "```")]
+#![cfg_attr(not(feature = "alloc"), doc = "```ignore")]
+//! # use chacha20poly1305_simd::{Payload, XChaCha20Poly1305, XNonce};
 //! let cipher = XChaCha20Poly1305::new(&[1u8; 32]);
 //! let nonce = [2u8; 24];
-//! let ct = cipher
-//!     .encrypt(&nonce, b"header", b"secret payload")
-//!     .unwrap();
+//! // no AAD:
+//! let ct = cipher.encrypt(&nonce, b"secret payload".as_ref()).unwrap();
 //! assert_eq!(ct.len(), b"secret payload".len() + 16);
 //! assert_eq!(
-//!     cipher.decrypt(&nonce, b"header", &ct).unwrap(),
+//!     cipher.decrypt(&nonce, ct.as_slice()).unwrap(),
+//!     b"secret payload"
+//! );
+//!
+//! // with AAD:
+//! let ct = cipher
+//!     .encrypt(&nonce, Payload { msg: b"secret payload", aad: b"header" })
+//!     .unwrap();
+//! assert_eq!(
+//!     cipher.decrypt(&nonce, Payload { msg: &ct, aad: b"header" }).unwrap(),
 //!     b"secret payload"
 //! );
 //! ```
-//!
+//! 
+//! Keys and nonces can be generated from the OS CSPRNG with the `getrandom`
+//! feature (default on):
+#![cfg_attr(feature = "getrandom", doc = "```")]
+#![cfg_attr(not(feature = "getrandom"), doc = "```ignore")]
+//! # use chacha20poly1305_simd::{ChaCha20Poly1305, Generate, Key, Nonce};
+//! let cipher = ChaCha20Poly1305::new(&Key::generate());
+//! let nonce = Nonce::generate();
+//! # let _ = cipher;
+//! # let _ = nonce;
+//! ```
+//! 
 //! On decryption failure the in-place buffer contents are unspecified
 //! (decryption is fused with authentication and proceeds before the tag is
 //! verified, as in BoringSSL).
@@ -123,6 +144,104 @@ pub type XNonce = [u8; 24];
 /// Poly1305 authentication tag.
 pub type Tag = [u8; 16];
 
+/// Payload for the allocating [`encrypt`](ChaCha20Poly1305::encrypt) /
+/// [`decrypt`](ChaCha20Poly1305::decrypt) methods.
+///
+/// A bare `&[u8]` coerces to a payload with empty AAD via [`From`], so
+/// associated data can be omitted entirely — pass an explicit [`Payload`]
+/// to authenticate associated data:
+///
+/// ```
+/// use chacha20poly1305_simd::Payload;
+///
+/// let p: Payload = (&b"hello"[..]).into();
+/// assert_eq!(p.msg, b"hello");
+/// assert!(p.aad.is_empty());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Payload<'msg, 'aad> {
+    /// Message to encrypt / decrypt.
+    pub msg: &'msg [u8],
+    /// Additional authenticated data (not encrypted).
+    pub aad: &'aad [u8],
+}
+
+impl<'msg> From<&'msg [u8]> for Payload<'msg, '_> {
+    fn from(msg: &'msg [u8]) -> Self {
+        Self { msg, aad: b"" }
+    }
+}
+
+/// Growable in-place byte buffer for
+/// [`encrypt_in_place`](ChaCha20Poly1305::encrypt_in_place) /
+/// [`decrypt_in_place`](ChaCha20Poly1305::decrypt_in_place).
+///
+/// Implemented for `Vec<u8>`; implement it for your own storage to run the
+/// in-place API directly on your buffer without copying into a `Vec`.
+pub trait Buffer: AsRef<[u8]> + AsMut<[u8]> {
+    /// Current length in bytes.
+    fn len(&self) -> usize;
+
+    /// Whether the buffer is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Append bytes, returning [`Error`] if there is no capacity.
+    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error>;
+
+    /// Shrink the buffer to `len` bytes.
+    fn truncate(&mut self, len: usize);
+}
+
+#[cfg(feature = "alloc")]
+impl Buffer for alloc::vec::Vec<u8> {
+    fn len(&self) -> usize {
+        alloc::vec::Vec::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        alloc::vec::Vec::is_empty(self)
+    }
+
+    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error> {
+        alloc::vec::Vec::extend_from_slice(self, other);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        alloc::vec::Vec::truncate(self, len);
+    }
+}
+
+/// Random generation for keys and nonces (requires the `getrandom` feature).
+///
+/// ```
+/// use chacha20poly1305_simd::{Generate, Key, Nonce};
+///
+/// let key = Key::generate();
+/// let nonce = Nonce::generate();
+/// # let _ = (key, nonce);
+/// ```
+#[cfg(feature = "getrandom")]
+pub trait Generate: Sized {
+    /// Generate a random value (e.g. a [`Key`] or [`Nonce`]) from the OS
+    /// CSPRNG.
+    ///
+    /// # Panics
+    /// Panics if the OS RNG is unavailable.
+    fn generate() -> Self;
+}
+
+#[cfg(feature = "getrandom")]
+impl<const N: usize> Generate for [u8; N] {
+    fn generate() -> Self {
+        let mut buf = [0u8; N];
+        getrandom::fill(&mut buf).expect("OS RNG failure");
+        buf
+    }
+}
+
 /// ChaCha20Poly1305 AEAD (RFC 8439).
 // Copy is unavailable under `zeroize`: the Drop impl zeroizes the key.
 #[derive(Clone)]
@@ -144,42 +263,45 @@ impl ChaCha20Poly1305 {
         chacha::State::new_ietf(&self.key, nonce)
     }
 
-    /// Encrypt `plaintext` allocating a `ciphertext || tag` buffer.
+    /// Encrypt `payload.msg`, allocating a `ciphertext || tag` buffer.
     ///
-    /// Returns [`Error`] if `plaintext.len()` exceeds the ChaCha20 counter
-    /// space (256 GiB - 64 KiB).
+    /// A bare `&[u8]` (empty AAD) auto-coerces into a [`Payload`]. Returns
+    /// [`Error`] if `payload.msg.len()` exceeds the ChaCha20 counter space
+    /// (256 GiB - 64 KiB).
     #[cfg(feature = "alloc")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn encrypt(
+    pub fn encrypt<'msg, 'aad>(
         &self,
         nonce: &Nonce,
-        aad: &[u8],
-        plaintext: &[u8],
+        payload: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
-        let mut buf = alloc::vec![0u8; plaintext.len() + 16];
-        buf[..plaintext.len()].copy_from_slice(plaintext);
-        let tag = self.encrypt_in_place_detached(nonce, aad, &mut buf[..plaintext.len()])?;
-        buf[plaintext.len()..].copy_from_slice(&tag);
+        let payload = payload.into();
+        let mut buf = alloc::vec![0u8; payload.msg.len() + 16];
+        buf[..payload.msg.len()].copy_from_slice(payload.msg);
+        let tag =
+            self.encrypt_in_place_detached(nonce, payload.aad, &mut buf[..payload.msg.len()])?;
+        buf[payload.msg.len()..].copy_from_slice(&tag);
         Ok(buf)
     }
 
-    /// Decrypt `ciphertext || tag`, returning the plaintext, or [`Error`] on
-    /// authentication failure.
+    /// Decrypt `payload.msg` (`ciphertext || tag`), returning the plaintext,
+    /// or [`Error`] on authentication failure.
     #[cfg(feature = "alloc")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn decrypt(
+    pub fn decrypt<'msg, 'aad>(
         &self,
         nonce: &Nonce,
-        aad: &[u8],
-        ciphertext_and_tag: &[u8],
+        ciphertext_and_tag: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
-        let (ct, tag) =
-            ciphertext_and_tag.split_at(ciphertext_and_tag.len().checked_sub(16).ok_or(Error)?);
+        let payload = ciphertext_and_tag.into();
+        let (ct, tag) = payload
+            .msg
+            .split_at(payload.msg.len().checked_sub(16).ok_or(Error)?);
         let mut buf = alloc::vec![0u8; ct.len()];
         buf.copy_from_slice(ct);
         self.decrypt_in_place_detached(
             nonce,
-            aad,
+            payload.aad,
             &mut buf,
             tag.try_into().expect("length checked"),
         )?;
@@ -237,7 +359,7 @@ impl ChaCha20Poly1305 {
         r
     }
 
-    /// In-place encryption appending the tag to a `Vec`-like buffer.
+    /// In-place encryption appending the tag to a `Buffer` (e.g. `Vec`).
     ///
     /// Returns [`Error`] if `buffer.len()` exceeds the ChaCha20 counter space.
     #[cfg(feature = "alloc")]
@@ -245,29 +367,31 @@ impl ChaCha20Poly1305 {
         &self,
         nonce: &Nonce,
         aad: &[u8],
-        buffer: &mut alloc::vec::Vec<u8>,
+        buffer: &mut dyn Buffer,
     ) -> Result<(), Error> {
-        let tag = self.encrypt_in_place_detached(nonce, aad, buffer)?;
-        buffer.extend_from_slice(&tag);
-        Ok(())
+        let tag = self.encrypt_in_place_detached(nonce, aad, buffer.as_mut())?;
+        buffer.extend_from_slice(&tag)
     }
 
-    /// In-place decryption stripping a trailing tag from a `Vec`-like buffer.
+    /// In-place decryption stripping a trailing tag from a `Buffer` (e.g.
+    /// `Vec`). The buffer is left untouched on authentication failure.
     #[cfg(feature = "alloc")]
     pub fn decrypt_in_place(
         &self,
         nonce: &Nonce,
         aad: &[u8],
-        buffer: &mut alloc::vec::Vec<u8>,
+        buffer: &mut dyn Buffer,
     ) -> Result<(), Error> {
-        if buffer.len() < 16 {
-            return Err(Error);
-        }
+        let ct_len = buffer.len().checked_sub(16).ok_or(Error)?;
         let tag: Tag = buffer
-            .split_off(buffer.len() - 16)
+            .as_ref()
+            .split_at(ct_len)
+            .1
             .try_into()
             .expect("16 bytes");
-        self.decrypt_in_place_detached(nonce, aad, buffer, &tag)
+        self.decrypt_in_place_detached(nonce, aad, &mut buffer.as_mut()[..ct_len], &tag)?;
+        buffer.truncate(ct_len);
+        Ok(())
     }
 }
 
@@ -288,34 +412,32 @@ impl XChaCha20Poly1305 {
 
     #[cfg(feature = "alloc")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn encrypt(
+    pub fn encrypt<'msg, 'aad>(
         &self,
         nonce: &XNonce,
-        aad: &[u8],
-        plaintext: &[u8],
+        payload: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
         #[allow(unused_mut)] // mut needed only under `zeroize`
         let (mut key, iv) = self.subkey(nonce);
         let cipher = ChaCha20Poly1305::new(&key);
         #[cfg(feature = "zeroize")]
         zeroize::Zeroize::zeroize(&mut key);
-        cipher.encrypt(&iv, aad, plaintext)
+        cipher.encrypt(&iv, payload)
     }
 
     #[cfg(feature = "alloc")]
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
-    pub fn decrypt(
+    pub fn decrypt<'msg, 'aad>(
         &self,
         nonce: &XNonce,
-        aad: &[u8],
-        ciphertext_and_tag: &[u8],
+        ciphertext_and_tag: impl Into<Payload<'msg, 'aad>>,
     ) -> Result<alloc::vec::Vec<u8>, Error> {
         #[allow(unused_mut)] // mut needed only under `zeroize`
         let (mut key, iv) = self.subkey(nonce);
         let cipher = ChaCha20Poly1305::new(&key);
         #[cfg(feature = "zeroize")]
         zeroize::Zeroize::zeroize(&mut key);
-        cipher.decrypt(&iv, aad, ciphertext_and_tag)
+        cipher.decrypt(&iv, ciphertext_and_tag)
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]

@@ -6,7 +6,7 @@
 #![allow(clippy::cast_possible_truncation)]
 
 use chacha20poly1305_simd::{
-    ChaCha20Poly1305, Key, Nonce, Tag, XChaCha20Poly1305, XNonce, active_backend,
+    ChaCha20Poly1305, Key, Nonce, Payload, Tag, XChaCha20Poly1305, XNonce, active_backend,
 };
 use rustcrypto::aead::{AeadInOut, KeyInit};
 
@@ -335,7 +335,12 @@ fn short_input_no_panic() {
     let nonce = [7u8; 12];
     for len in 0..16usize {
         assert!(
-            cipher.decrypt(&nonce, AAD, &vec![0u8; len]).is_err(),
+            cipher
+                .decrypt(&nonce, Payload {
+                    msg: &vec![0u8; len],
+                    aad: AAD
+                })
+                .is_err(),
             "len {len}"
         );
         let mut buf = vec![0u8; len];
