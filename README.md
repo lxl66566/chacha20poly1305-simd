@@ -77,11 +77,15 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 Highlights:
 
-|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                     |
-| ------------------- | ----------------------------- | --------------------------------------------- |
-| tiny (16–256 B)     | 1.6–4.9×                      | 1.3–2.6× faster (fused prologue pays off)     |
-| mid (512 B – 1 KiB) | 1.8–3.1×                      | ~parity (0.8–1.1×)                            |
-| large (≥ 4 KiB)     | 1.7–4.6× (AVX2 64 KiB: 4.5×)  | OpenSSL ahead (1 MiB: 5.1 GiB/s vs 3.8 GiB/s) |
+|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                    |
+| ------------------- | ----------------------------- | -------------------------------------------- |
+| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.2× faster (fused prologue pays off)    |
+| mid (512 B – 1 KiB) | 1.8–3.0×                      | ~parity (0.9–1.25×)                          |
+| large (≥ 4 KiB)     | 1.7–6.2× (AVX2 64 KiB: 4.4×)  | parity (1 MiB: 5.15 vs 5.11 GiB/s)           |
+
+**open** matches seal: 5.14 GiB/s at 1 MiB (fused cipher+MAC loop; the MAC reads
+ciphertext the xor cursor has not touched yet, so unlike seal it needs no
+store→load-forwarding lag).
 
 ### AArch64
 
