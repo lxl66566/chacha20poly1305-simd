@@ -121,10 +121,10 @@
 // get 2 MiB). Release codegen is unchanged (byte-identical disassembly).
 // Use `#[cfg_attr(not(debug_assertions), inline(always))]` instead.
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "alloc", test))]
 extern crate alloc;
 
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", test))]
 extern crate std;
 
 mod aead;
@@ -336,8 +336,9 @@ impl Buffer for zeroize::Zeroizing<alloc::vec::Vec<u8>> {
     }
 }
 
-#[cfg(all(feature = "alloc", feature = "bytes"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "bytes"))))]
+// The `bytes` feature implies `alloc`, so no `alloc` term is needed here.
+#[cfg(feature = "bytes")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
 impl Buffer for bytes::BytesMut {
     fn len(&self) -> usize {
         bytes::BytesMut::len(self)
@@ -478,6 +479,10 @@ macro_rules! detached_into_methods {
         /// Decrypt `src` into `dst`, verifying `tag`. As with
         /// [`encrypt_into_detached`](Self::encrypt_into_detached), `src` is
         /// never modified and `dst.len()` must be at least `src.len()`.
+        ///
+        /// On [`Error::TagMismatch`] the first `src.len()` bytes of `dst`
+        /// hold unspecified data: decryption is fused with authentication
+        /// and only verified after it has run.
         #[cfg_attr(feature = "hotpath", hotpath::measure)]
         pub fn decrypt_into_detached(
             &self,

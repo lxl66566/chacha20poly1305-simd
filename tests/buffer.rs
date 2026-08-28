@@ -3,9 +3,10 @@
 
 #![cfg(feature = "alloc")]
 
-use chacha20poly1305_simd::{ChaCha20Poly1305, Error, XChaCha20Poly1305};
+use chacha20poly1305_simd::{Error, XChaCha20Poly1305};
 
 const KEY: [u8; 32] = [0x42; 32];
+#[cfg(any(feature = "zeroize", feature = "bytes"))]
 const NONCE: [u8; 12] = [7; 12];
 const AAD: &[u8] = b"header";
 
@@ -15,7 +16,7 @@ const AAD: &[u8] = b"header";
 fn zeroizing_buffer_roundtrip() {
     use zeroize::Zeroizing;
 
-    let cipher = ChaCha20Poly1305::new(KEY);
+    let cipher = chacha20poly1305_simd::ChaCha20Poly1305::new(KEY);
     let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(b"hello world".to_vec());
     cipher.encrypt_in_place(&NONCE, AAD, &mut buf).unwrap();
     assert_eq!(buf.len(), b"hello world".len() + 16);
@@ -29,7 +30,7 @@ fn zeroizing_buffer_roundtrip() {
 fn bytes_mut_buffer_roundtrip() {
     use bytes::BytesMut;
 
-    let cipher = ChaCha20Poly1305::new(KEY);
+    let cipher = chacha20poly1305_simd::ChaCha20Poly1305::new(KEY);
     let mut buf = BytesMut::from(&b"hello world"[..]);
     cipher.encrypt_in_place(&NONCE, AAD, &mut buf).unwrap();
     assert_eq!(buf.len(), b"hello world".len() + 16);

@@ -163,6 +163,7 @@ impl<B: Backend> Poly<B> {
     }
 
     /// Fused-kernel access to the inner backend.
+    #[cfg(backend_avx512)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) fn inner_mut(&mut self) -> &mut B {
         &mut self.inner

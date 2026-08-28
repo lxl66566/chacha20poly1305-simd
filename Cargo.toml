@@ -1,9 +1,9 @@
 [package]
 name         = "chacha20poly1305-simd"
-version      = "0.2.1"
+version      = "0.3.0"
 edition      = "2024"
 rust-version = "1.89"
-description  = "Fast ChaCha20-Poly1305 / XChaCha20-Poly1305 AEAD with hand-written x86-64 AVX2 / AVX-512 / SSE2 and aarch64 NEON kernels"
+description  = "Fast (X)ChaCha20-Poly1305 AEAD with hand-written AVX-512/AVX2/NEON kernels in pure Rust"
 readme       = "README.md"
 homepage     = "https://github.com/lxl66566/chacha20poly1305-simd"
 repository   = "https://github.com/lxl66566/chacha20poly1305-simd"
@@ -24,6 +24,11 @@ include      = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name              = "xcheck"
+# Uses the native out-of-place API (alloc-gated) and the RustCrypto dev-dep.
+required-features = ["alloc"]
 
 [[bench]]
 harness = false
@@ -48,7 +53,9 @@ rustcrypto = { package = "chacha20poly1305", version = "0.11" }
 default   = ["alloc", "avx512", "std"]
 # RustCrypto `aead` trait impls (drop-in ecosystem interop).
 aead      = ["dep:aead"]
-alloc     = []
+# Enable zeroize's `alloc` impls (`Zeroizing<Vec<u8>>` needs `Vec: Zeroize`)
+# only when both `alloc` and `zeroize` are on.
+alloc     = ["zeroize?/alloc"]
 # Compile the x86-64 AVX-512 backend. Disable via `default-features = false` to
 # keep AVX-512 instructions out of the binary.
 avx512    = []
