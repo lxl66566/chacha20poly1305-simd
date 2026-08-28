@@ -1,5 +1,19 @@
 //! AVX-512 IFMA Poly1305 — OpenSSL `vpmadd52` 8-block algorithm.
 //!
+//! Copyright 2016-2025 The OpenSSL Project Authors. All Rights Reserved.
+//!
+//! Licensed under the Apache License 2.0 (the "License"); you may not use
+//! this file except in compliance with the License. You can obtain a copy
+//! at https://www.apache.org/licenses/LICENSE-2.0
+//!
+//! Source: OpenSSL `crypto/poly1305/asm/poly1305-x86_64.pl` (VPMADD52
+//! radix-2^44 path). This Rust port modifies the original: the streaming
+//! [`Backend`] contract caches blocks until eight are pending so engine
+//! `absorb4` pairs fuse into one 8-lane round; the `r^2..r^8` powers are
+//! only computed when the first full group arrives; finalization collapses
+//! the eight lanes with per-lane powers `r^(8-pos)` instead of OpenSSL's
+//! 4x/2x/1x tail tiers; leftover blocks fold scalar-side with `r^1`.
+//!
 //! Radix 2^44 (limbs 44/44/42 bits in 64-bit lanes) with the
 //! `vpmadd52{lu,hu}q` fused multiply-accumulators: one zmm holds eight
 //! independent block accumulators, so 128 bytes fold per ~18-multiplies
@@ -8,12 +22,6 @@
 //! per-lane powers `r^(8-pos)` and folds the ≤ 8 leftover blocks one at a
 //! time with `r^1` scalar-side (the role of OpenSSL's 4x/2x/1x tail tiers,
 //! at negligible cost since it runs once per message).
-//!
-//! Algorithm after OpenSSL `crypto/poly1305/asm/poly1305-x86_64.pl`
-//! (Apache-2.0), restructured for the crate's streaming [`Backend`]
-//! contract: blocks are cached until eight are pending (so engine `absorb4`
-//! pairs fuse into one 8-lane round), and the `r^2..r^8` powers are only
-//! computed when the first full group actually arrives.
 
 use core::arch::x86_64::*;
 
