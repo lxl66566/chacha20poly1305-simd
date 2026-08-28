@@ -146,6 +146,40 @@ pub type XNonce = [u8; 24];
 /// Poly1305 authentication tag.
 pub type Tag = [u8; 16];
 
+/// Split a trailing 16-byte Poly1305 tag off `buffer` — the recurring
+/// boilerplate when driving the `*_detached` APIs over a `ciphertext || tag`
+/// wire format.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidLength`] if `buffer` is shorter than the tag.
+///
+/// # Example
+///
+/// ```
+/// use chacha20poly1305_simd::{ChaCha20Poly1305, split_tag};
+///
+/// let cipher = ChaCha20Poly1305::new([0x42u8; 32]);
+/// let nonce = [7u8; 12];
+///
+/// let mut msg = *b"hello world";
+/// let tag = cipher
+///     .encrypt_in_place_detached(&nonce, b"aad", &mut msg)
+///     .unwrap();
+/// let mut wire = [&msg[..], &tag[..]].concat();
+///
+/// let (ct, tag) = split_tag(&mut wire).unwrap();
+/// cipher
+///     .decrypt_in_place_detached(&nonce, b"aad", ct, tag)
+///     .unwrap();
+/// ```
+pub fn split_tag(buffer: &mut [u8]) -> Result<(&mut [u8], &Tag), Error> {
+    let len = buffer.len().checked_sub(16).ok_or(Error::InvalidLength)?;
+    let (body, tag) = buffer.split_at_mut(len);
+    let tag: &Tag = (&*tag).try_into().expect("16 bytes");
+    Ok((body, tag))
+}
+
 /// Payload for the allocating [`encrypt`](ChaCha20Poly1305::encrypt) /
 /// [`decrypt`](ChaCha20Poly1305::decrypt) methods.
 ///
@@ -398,6 +432,51 @@ macro_rules! buffer_aead_methods {
     };
 }
 
+/// Out-of-place detached methods shared by both cipher types: `src` is
+/// never written to (read-only `mmap`, shared buffers); `dst` receives
+/// exactly `src.len()` bytes.
+macro_rules! detached_into_methods {
+    ($nonce:ty) => {
+        /// Encrypt `src` into `dst`, returning the detached tag. `src` is
+        /// never modified — useful for ciphertext targets that cannot be
+        /// mutated (read-only `mmap`, shared memory), at the cost of one
+        /// memcpy into `dst`.
+        ///
+        /// `dst.len()` must be at least `src.len()` ([`Error::InvalidLength`]
+        /// otherwise); exactly `src.len()` bytes are written, leaving any
+        /// headroom untouched.
+        #[cfg_attr(feature = "hotpath", hotpath::measure)]
+        pub fn encrypt_into_detached(
+            &self,
+            nonce: &$nonce,
+            aad: &[u8],
+            src: &[u8],
+            dst: &mut [u8],
+        ) -> Result<Tag, Error> {
+            let msg = dst.get_mut(..src.len()).ok_or(Error::InvalidLength)?;
+            msg.copy_from_slice(src);
+            self.encrypt_in_place_detached(nonce, aad, msg)
+        }
+
+        /// Decrypt `src` into `dst`, verifying `tag`. As with
+        /// [`encrypt_into_detached`](Self::encrypt_into_detached), `src` is
+        /// never modified and `dst.len()` must be at least `src.len()`.
+        #[cfg_attr(feature = "hotpath", hotpath::measure)]
+        pub fn decrypt_into_detached(
+            &self,
+            nonce: &$nonce,
+            aad: &[u8],
+            src: &[u8],
+            dst: &mut [u8],
+            tag: &Tag,
+        ) -> Result<(), Error> {
+            let msg = dst.get_mut(..src.len()).ok_or(Error::InvalidLength)?;
+            msg.copy_from_slice(src);
+            self.decrypt_in_place_detached(nonce, aad, msg, tag)
+        }
+    };
+}
+
 /// ChaCha20Poly1305 AEAD (RFC 8439).
 // Copy is unavailable under `zeroize`: the Drop impl zeroizes the key.
 #[derive(Clone)]
@@ -407,6 +486,8 @@ pub struct ChaCha20Poly1305 {
 }
 
 impl ChaCha20Poly1305 {
+    detached_into_methods!(Nonce);
+
     buffer_aead_methods!(Nonce);
 
     /// Create a new cipher instance from a 256-bit key.
@@ -531,6 +612,8 @@ pub struct XChaCha20Poly1305 {
 }
 
 impl XChaCha20Poly1305 {
+    detached_into_methods!(XNonce);
+
     buffer_aead_methods!(XNonce);
 
     /// Create a new cipher instance from a 256-bit key.
