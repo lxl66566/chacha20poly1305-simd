@@ -28,6 +28,7 @@
 //! | `alloc`     | ✓       | allocating API                                                    |
 //! | `avx512`    | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
 //! | `getrandom` | –       | `Key`/`Nonce` random generation via [`Generate`]                  |
+//! | `aead`      | –       | RustCrypto `aead` 0.5 trait impls ([`aead_compat`])               |
 //! | `bytes`     | –       | [`Buffer`] impl for `bytes::BytesMut`                             |
 //! | `zeroize`   | –       | zeroize keys and intermediate secrets on drop (with `alloc`:      |
 //! |             |         | [`Buffer`] impl for `Zeroizing<Vec<u8>>`)                         |
@@ -131,6 +132,10 @@ mod aead;
 mod backend;
 mod chacha;
 mod poly1305;
+
+#[cfg(feature = "aead")]
+#[cfg_attr(docsrs, doc(cfg(feature = "aead")))]
+pub mod aead_compat;
 
 use core::fmt;
 
