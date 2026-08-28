@@ -64,7 +64,8 @@ let nonce = Nonce::generate();
 | `std`       | ✓       | runtime CPU detection (otherwise scalar backend)   |
 | `alloc`     | ✓       | allocating API                                     |
 | `getrandom` | –       | `Key`/`Nonce` random generation via `Generate`     |
-| `zeroize`   | –       | zeroize keys and intermediate secrets on drop      |
+| `bytes`     | –       | `Buffer` impl for `bytes::BytesMut`                |
+| `zeroize`   | –       | zeroize keys and secrets on drop (`Buffer` impl for `Zeroizing<Vec<u8>>` with `alloc`) |
 | `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes |
 
 ## Backend selection

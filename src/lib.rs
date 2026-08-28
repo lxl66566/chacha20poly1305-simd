@@ -28,7 +28,9 @@
 //! | `alloc`     | ✓       | allocating API                                                    |
 //! | `avx512`    | ✓       | x86-64 AVX-512 backend; disable to keep the ISA out of the binary |
 //! | `getrandom` | –       | `Key`/`Nonce` random generation via [`Generate`]                  |
-//! | `zeroize`   | –       | zeroize keys and intermediate secrets on drop                     |
+//! | `bytes`     | –       | [`Buffer`] impl for `bytes::BytesMut`                             |
+//! | `zeroize`   | –       | zeroize keys and intermediate secrets on drop (with `alloc`:      |
+//! |             |         | [`Buffer`] impl for `Zeroizing<Vec<u8>>`)                         |
 //! | `hotpath`   | –       | [hotpath](https://crates.io/crates/hotpath) probes                |
 //!
 //! # Usage
@@ -176,16 +178,41 @@ impl<'msg> From<&'msg [u8]> for Payload<'msg, '_> {
 /// [`encrypt_in_place`](ChaCha20Poly1305::encrypt_in_place) /
 /// [`decrypt_in_place`](ChaCha20Poly1305::decrypt_in_place).
 ///
-/// Implemented for `Vec<u8>`; implement it for your own storage to run the
-/// in-place API directly on your buffer without copying into a `Vec`.
-pub trait Buffer: AsRef<[u8]> + AsMut<[u8]> {
+/// Implemented for `Vec<u8>` and — behind the respective features — for
+/// [`Zeroizing<Vec<u8>>`](zeroize::Zeroizing) and
+/// [`BytesMut`](bytes::BytesMut); implement it for your own storage to run
+/// the in-place API directly on your buffer without copying into a `Vec`.
+///
+/// Slice access is expressed through the trait's own methods (not
+/// `AsRef`/`AsMut` supertraits), so foreign wrapper types can never satisfy
+/// the bound via the orphan rule alone — the impls above ship first-party
+/// instead.
+///
+/// # Invariants
+///
+/// Implementations must uphold:
+///
+/// - `as_slice().len() == len()` (likewise `as_mut_slice`),
+/// - `extend_from_slice` appends `other` to the end of the buffer,
+/// - `truncate(n)` shrinks the buffer to `n` bytes if it is currently longer, and is a no-op
+///   otherwise.
+pub trait Buffer {
     /// Current length in bytes.
+    #[must_use]
     fn len(&self) -> usize;
 
     /// Whether the buffer is empty.
+    #[must_use]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Borrow the initialized contents.
+    #[must_use]
+    fn as_slice(&self) -> &[u8];
+
+    /// Mutably borrow the initialized contents.
+    fn as_mut_slice(&mut self) -> &mut [u8];
 
     /// Append bytes, returning [`Error`] if there is no capacity.
     fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error>;
@@ -204,6 +231,14 @@ impl Buffer for alloc::vec::Vec<u8> {
         alloc::vec::Vec::is_empty(self)
     }
 
+    fn as_slice(&self) -> &[u8] {
+        alloc::vec::Vec::as_slice(self)
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        alloc::vec::Vec::as_mut_slice(self)
+    }
+
     fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error> {
         alloc::vec::Vec::extend_from_slice(self, other);
         Ok(())
@@ -211,6 +246,84 @@ impl Buffer for alloc::vec::Vec<u8> {
 
     fn truncate(&mut self, len: usize) {
         alloc::vec::Vec::truncate(self, len);
+    }
+}
+
+// NOTE: foreign wrapper types (Zeroizing, BytesMut) can only get a `Buffer`
+// impl from us — the local trait satisfies the orphan rule; their own crates
+// cannot implement our trait for these same types.
+//
+// The inner accessors below are single deref-coercion sites: writing
+// `(**self).len()` trips `explicit_auto_deref`, while `self.len()` trips a
+// false-positive `unconditional_recursion` (resolution picks the inherent
+// `Vec` method through Deref at runtime — verified by the round-trip tests).
+#[cfg(all(feature = "alloc", feature = "zeroize"))]
+fn zeroizing_inner(buf: &zeroize::Zeroizing<alloc::vec::Vec<u8>>) -> &alloc::vec::Vec<u8> {
+    buf
+}
+
+#[cfg(all(feature = "alloc", feature = "zeroize"))]
+fn zeroizing_inner_mut(
+    buf: &mut zeroize::Zeroizing<alloc::vec::Vec<u8>>,
+) -> &mut alloc::vec::Vec<u8> {
+    buf
+}
+
+#[cfg(all(feature = "alloc", feature = "zeroize"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "zeroize"))))]
+impl Buffer for zeroize::Zeroizing<alloc::vec::Vec<u8>> {
+    fn len(&self) -> usize {
+        zeroizing_inner(self).len()
+    }
+
+    fn is_empty(&self) -> bool {
+        zeroizing_inner(self).is_empty()
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        zeroizing_inner(self).as_slice()
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        zeroizing_inner_mut(self).as_mut_slice()
+    }
+
+    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error> {
+        zeroizing_inner_mut(self).extend_from_slice(other);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        zeroizing_inner_mut(self).truncate(len);
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "bytes"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "bytes"))))]
+impl Buffer for bytes::BytesMut {
+    fn len(&self) -> usize {
+        bytes::BytesMut::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        bytes::BytesMut::is_empty(self)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        self
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        self
+    }
+
+    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), Error> {
+        bytes::BytesMut::extend_from_slice(self, other);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        bytes::BytesMut::truncate(self, len);
     }
 }
 
@@ -373,7 +486,7 @@ impl ChaCha20Poly1305 {
         aad: &[u8],
         buffer: &mut dyn Buffer,
     ) -> Result<(), Error> {
-        let tag = self.encrypt_in_place_detached(nonce, aad, buffer.as_mut())?;
+        let tag = self.encrypt_in_place_detached(nonce, aad, buffer.as_mut_slice())?;
         buffer.extend_from_slice(&tag)
     }
 
@@ -391,13 +504,8 @@ impl ChaCha20Poly1305 {
         buffer: &mut dyn Buffer,
     ) -> Result<(), Error> {
         let ct_len = buffer.len().checked_sub(16).ok_or(Error::InvalidLength)?;
-        let tag: Tag = buffer
-            .as_ref()
-            .split_at(ct_len)
-            .1
-            .try_into()
-            .expect("16 bytes");
-        self.decrypt_in_place_detached(nonce, aad, &mut buffer.as_mut()[..ct_len], &tag)?;
+        let tag: Tag = buffer.as_slice()[ct_len..].try_into().expect("16 bytes");
+        self.decrypt_in_place_detached(nonce, aad, &mut buffer.as_mut_slice()[..ct_len], &tag)?;
         buffer.truncate(ct_len);
         Ok(())
     }

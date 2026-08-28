@@ -30,6 +30,7 @@ harness = false
 name    = "aead"
 
 [dependencies]
+bytes     = { version = "1", optional = true, default-features = false }
 getrandom = { version = "0.4", default-features = false, optional = true }
 hotpath   = { version = "0.24", optional = true }
 zeroize   = { version = "1.8", default-features = false, optional = true }
@@ -48,11 +49,14 @@ alloc     = []
 # Compile the x86-64 AVX-512 backend. Disable via `default-features = false` to
 # keep AVX-512 instructions out of the binary.
 avx512    = []
+# `Buffer` impl for `bytes::BytesMut`.
+bytes     = ["dep:bytes", "alloc"]
 # Random key/nonce generation via `Generate::generate()`.
 getrandom = ["dep:getrandom"]
 hotpath   = ["dep:hotpath", "hotpath/hotpath", "std"]
 std       = ["alloc"]
-# Zeroize secret key material (cipher key, Poly1305 key/state) on drop.
+# Zeroize secret key material (cipher key, Poly1305 key/state) on drop; with
+# `alloc` this also enables a `Buffer` impl for `Zeroizing<Vec<u8>>`.
 zeroize   = ["dep:zeroize"]
 
 [lints.clippy]
