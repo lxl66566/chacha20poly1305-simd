@@ -1,4 +1,5 @@
-//! Throughput benchmark: this crate vs the RustCrypto `chacha20poly1305` fork.
+//! Throughput benchmark: this crate vs the RustCrypto `chacha20poly1305` fork
+//! vs aws-lc-rs (AWS-LC, runtime auto-dispatch like OpenSSL).
 //!
 //! Run: `cargo bench --bench aead`
 //!
@@ -11,15 +12,26 @@
 //! RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2 \
 //!            --cfg chacha20_backend="avx2"' cargo bench --bench aead
 //! ```
+//!
+//! aws-lc-rs exposes no XChaCha20-Poly1305, so it only takes part in the
+//! plain ChaCha20-Poly1305 seal/open groups.
 
 use std::hint::black_box;
 
+use awslc::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use chacha20poly1305_simd::{ChaCha20Poly1305, XChaCha20Poly1305, active_backend};
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use rustcrypto::{
     ChaCha20Poly1305 as RcCipher, XChaCha20Poly1305 as RcXCipher,
     aead::{Aead, AeadInOut, KeyInit, Payload as RcPayload},
 };
+
+/// aws-lc-rs bench id: single series, CPU auto-dispatch (no cfg variants).
+const AWSLC_ID: &str = "awslc";
+
+fn awslc_key(key: &[u8; 32]) -> LessSafeKey {
+    LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).expect("aws-lc key init"))
+}
 
 /// Label for our side: the forced backend name, or the probed one in auto mode.
 fn ours_tag() -> String {
@@ -74,6 +86,7 @@ fn bench_seal(c: &mut Criterion) {
     let rnonce = rustcrypto::Nonce::from(nonce);
 
     let (ours_tag, rc_tag) = (ours_tag(), rustcrypto_tag());
+    let awslc = awslc_key(&key);
     let mut group = c.benchmark_group("seal/chacha20poly1305");
     for &size in SIZES {
         let mut buf = vec![0u8; size];
@@ -100,6 +113,15 @@ fn bench_seal(c: &mut Criterion) {
                 BatchSize::LargeInput,
             );
         });
+        group.bench_function(format!("{AWSLC_ID}/{size}"), |b| {
+            b.iter(|| {
+                let _ = black_box(awslc.seal_in_place_separate_tag(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(aad),
+                    &mut buf,
+                ));
+            });
+        });
     }
     group.finish();
 }
@@ -124,6 +146,17 @@ fn bench_open(c: &mut Criterion) {
                 &mut buf,
                 black_box(&tag),
             )
+        });
+    });
+    let awslc = awslc_key(&key);
+    group.bench_function(format!("{AWSLC_ID}/1MiB"), |b| {
+        b.iter(|| {
+            let _ = black_box(awslc.open_in_place_separate_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad),
+                tag.as_ref(),
+                &mut buf,
+            ));
         });
     });
     group.finish();

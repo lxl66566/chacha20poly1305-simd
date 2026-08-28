@@ -10,7 +10,8 @@ cannot share one cargo cache), produced by e.g.:
         'seal/chacha20poly1305|open/chacha20poly1305'
 
 (soft/sse2/avx2 analogous; see README "Performance".) OpenSSL medians come
-from perf/openssl.csv (seal, EVP_chacha20_poly1305).
+from perf/openssl.csv (seal, EVP_chacha20_poly1305). aws-lc-rs is CPU
+auto-dispatch (one series) and is read from the avx512 tier dir.
 """
 
 import csv
@@ -34,14 +35,25 @@ def read_ns(root, group, bid, size):
         return json.load(f)["mean"]["point_estimate"]  # ns
 
 
-data: dict = {"ours": {}, "rustcrypto": {}, "openssl": {}, "open_1mib": {}}
+data: dict = {"ours": {}, "rustcrypto": {}, "awslc": {}, "openssl": {}, "open_1mib": {}}
 for tier, (root, ours_id, rc_id) in TIERS.items():
-    data["ours"][tier] = [read_ns(root, "seal_chacha20poly1305", ours_id, s) for s in SIZES]
+    data["ours"][tier] = [
+        read_ns(root, "seal_chacha20poly1305", ours_id, s) for s in SIZES
+    ]
     data["rustcrypto"][tier] = [
         read_ns(root, "seal_chacha20poly1305", rc_id, s) for s in SIZES
     ]
     # Open is only benched at 1 MiB (criterion id label, not the raw size).
     data["open_1mib"][tier] = read_ns(root, "open_chacha20poly1305", ours_id, "1MiB")
+
+# aws-lc-rs: single auto-dispatch series, benched with the avx512 tier run.
+awslc_root = TIERS["avx512"][0]
+data["awslc"]["auto"] = [
+    read_ns(awslc_root, "seal_chacha20poly1305", "awslc", s) for s in SIZES
+]
+data["open_1mib"]["awslc"] = read_ns(
+    awslc_root, "open_chacha20poly1305", "awslc", "1MiB"
+)
 
 with open("perf/openssl.csv") as f:
     r = list(csv.reader(f))[1:]
@@ -56,9 +68,13 @@ def mib(ns, s):
     return s / ns * 1000 / 1.048576
 
 
-print(f"{'size':>8} | " + " | ".join(f"{t:>7}" for t in TIERS) + " | openssl")
+print(f"{'size':>8} | " + " | ".join(f"{t:>7}" for t in TIERS) + " |  awslc | openssl")
 for i, s in enumerate(SIZES):
     row = [f"{mib(data['ours'][t][i], s):7.0f}" for t in TIERS]
+    aw = f"{mib(data['awslc']['auto'][i], s):7.0f}"
     ossl = f"{mib(data['openssl']['auto'][i], s):7.0f}"
-    print(f"{s:>8} | " + " | ".join(row) + f" | {ossl}")
-print("open 1MiB (MiB/s):", {t: round(mib(v, 1 << 20)) for t, v in data["open_1mib"].items()})
+    print(f"{s:>8} | " + " | ".join(row) + f" | {aw} | {ossl}")
+print(
+    "open 1MiB (MiB/s):",
+    {t: round(mib(v, 1 << 20)) for t, v in data["open_1mib"].items()},
+)

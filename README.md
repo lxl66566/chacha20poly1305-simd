@@ -87,19 +87,21 @@ RUSTFLAGS='--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' cargo b
 
 > Test environment: AMD Ryzen 9 7950X (Zen 4) · Linux · rustc 1.100-nightly  
 > Workload: AEAD **seal** (`encrypt_in_place_detached`, 16-byte AAD, in-place), throughput = msg / wall time.  
-> Contenders: RustCrypto `chacha20poly1305` 0.11 (`cargo bench --bench aead`, same ISA tier) and OpenSSL 4.1.0-dev (static build, `EVP_chacha20_poly1305`, runtime auto-dispatch — on this CPU: AVX-512 ChaCha + AVX-512 IFMA Poly1305; bench driver: [`perf/openssl_bench.c`](perf/openssl_bench.c)).
+> Contenders: RustCrypto `chacha20poly1305` 0.11 (`cargo bench --bench aead`, same ISA tier), aws-lc-rs 1.18 (AWS-LC, runtime auto-dispatch) and OpenSSL 4.1.0-dev (static build, `EVP_chacha20_poly1305`, runtime auto-dispatch — on this CPU: AVX-512 ChaCha + AVX-512 IFMA Poly1305; bench driver: [`perf/openssl_bench.c`](perf/openssl_bench.c)).
 
 ![Throughput vs message size](perf/chart-throughput.svg)
 
-![Speedup over RustCrypto and OpenSSL](perf/chart-speedup.svg)
+![Speedup over RustCrypto, OpenSSL and aws-lc-rs](perf/chart-speedup.svg)
 
 Highlights:
 
-|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                 |
-| ------------------- | ----------------------------- | ----------------------------------------- |
-| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.2× faster (fused prologue pays off) |
-| mid (512 B – 1 KiB) | 1.8–3.0×                      | ~parity (0.9–1.25×)                       |
-| large (≥ 4 KiB)     | 1.7–6.2× (AVX2 64 KiB: 4.4×)  | parity (1 MiB: 5.15 vs 5.11 GiB/s)        |
+|                     | vs RustCrypto (same ISA tier) | vs OpenSSL 4.1-dev (auto)                 | vs aws-lc-rs (auto)                           |
+| ------------------- | ----------------------------- | ----------------------------------------- | --------------------------------------------- |
+| tiny (16–256 B)     | 1.7–4.9×                      | 1.4–3.2× faster (fused prologue pays off) | ~parity–1.7× slower (single-shot EVP_AEAD)    |
+| mid (512 B – 1 KiB) | 1.8–3.0×                      | ~parity (0.9–1.25×)                       | 1.4–1.6× slower                               |
+| large (≥ 4 KiB)     | 1.7–6.2× (AVX2 64 KiB: 4.4×)  | parity (1 MiB: 5.15 vs 5.11 GiB/s)        | up to 1.4× faster (1 MiB: 5.27 vs 3.65 GiB/s) |
+
+Open (decrypt) at 1 MiB: this crate 5.14 GiB/s vs aws-lc-rs 3.54 GiB/s (1.45×).
 
 ### AArch64
 
