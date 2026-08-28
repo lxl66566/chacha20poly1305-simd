@@ -13,20 +13,17 @@ impl Ops for Avx512Ops {
 
     const CHACHA_BATCH: usize = crate::chacha::avx512::BATCH_BLOCKS;
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
         debug_assert_eq!(b1.len(), BLOCK);
         crate::chacha::avx512::gen_key_xor2(state, key_out, b1.try_into().unwrap());
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
         crate::chacha::avx512::gen_ks_small(state, key_out, ks);
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]) {
         let mut off = 0usize;
@@ -56,7 +53,6 @@ impl Ops for Avx512Ops {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         debug_assert_eq!(buf.len(), 1024);
@@ -86,31 +82,26 @@ impl Ops for Avx512IfmaOps {
     const CHACHA_BATCH: usize = crate::chacha::avx512::BATCH_BLOCKS;
     const FUSED_OPEN: bool = true;
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
         unsafe { <Avx512Ops as Ops>::gen_key_xor2(state, key_out, b1) }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
         unsafe { <Avx512Ops as Ops>::gen_ks_small(state, key_out, ks) }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]) {
         unsafe { <Avx512Ops as Ops>::chacha_xor(state, buf) }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         unsafe { <Avx512Ops as Ops>::chacha_xor_batch(state, buf) }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn seal_bulk(
         state: &mut State,
@@ -132,7 +123,6 @@ impl Ops for Avx512IfmaOps {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn open_bulk(
         state: &mut State,

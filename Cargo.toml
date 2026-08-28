@@ -1,6 +1,6 @@
 [package]
 name         = "chacha20poly1305-simd"
-version      = "0.1.0"
+version      = "0.1.1"
 edition      = "2024"
 rust-version = "1.89"
 description  = "Fast ChaCha20-Poly1305 / XChaCha20-Poly1305 AEAD with hand-written x86-64 AVX2 / AVX-512 / SSE2 and aarch64 NEON kernels"
@@ -10,7 +10,16 @@ repository   = "https://github.com/lxl66566/chacha20poly1305-simd"
 license      = "MIT OR Apache-2.0"
 keywords     = ["aead", "chacha20", "encryption", "poly1305", "simd"]
 categories   = ["algorithms", "cryptography", "no-std"]
-include = ["/LICENSE-*", "/README.md", "/benches/**", "/build.rs", "/examples/**", "/perf/chart-*.svg", "/src/**", "/tests/**"]
+include      = [
+  "/LICENSE-*",
+  "/README.md",
+  "/benches/**",
+  "/build.rs",
+  "/examples/**",
+  "/perf/chart-*.svg",
+  "/src/**",
+  "/tests/**"
+]
 
 [package.metadata.docs.rs]
 all-features = true

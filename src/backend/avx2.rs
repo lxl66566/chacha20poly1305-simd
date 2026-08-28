@@ -13,20 +13,17 @@ impl Ops for Avx2Ops {
 
     const CHACHA_BATCH: usize = crate::chacha::avx2::BATCH_BLOCKS;
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
         debug_assert_eq!(b1.len(), BLOCK);
         crate::chacha::avx2::gen_key_xor2(state, key_out, b1.try_into().unwrap());
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
         crate::chacha::avx2::gen_ks_small(state, key_out, ks);
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor(state: &mut State, buf: &mut [u8]) {
         let mut off = 0usize;
@@ -53,7 +50,6 @@ impl Ops for Avx2Ops {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn chacha_xor_batch(state: &mut State, buf: &mut [u8]) {
         debug_assert_eq!(buf.len(), 512);

@@ -58,7 +58,6 @@ pub(crate) trait Ops {
     /// the backend fuses cipher+MAC into one loop (measured: across call
     /// boundaries the latency-bound MAC gets ~zero OoO overlap with the
     /// cipher).
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn seal_bulk(
         state: &mut State,
@@ -85,7 +84,6 @@ pub(crate) trait Ops {
 
     /// Fused open bulk run. Only called when `FUSED_OPEN` holds and the
     /// engine has normalized the MAC window cache. Default: no-op.
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn open_bulk(
         state: &mut State,
@@ -120,7 +118,6 @@ pub(crate) const SMALL_MAX: usize = 3 * BLOCK;
 
 /// Init the Poly1305 state from the one-time key (scrubbed afterwards when
 /// `zeroize` is on) and absorb the zero-padded AAD.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[u8]) -> Poly<B> {
     let mut poly = Poly::<B>::new(key);
@@ -138,7 +135,6 @@ unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[
 /// the stream to a 64-byte boundary, drains `absorb4` windows over the
 /// message, then folds the assembled `[ct remainder ‖ zero pad][lengths]`
 /// tail as whole blocks.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
     poly: &mut Poly<B>,
@@ -180,7 +176,6 @@ unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
 
 /// Absorb the ciphertext zero-padding and the AAD/message lengths, then
 /// emit the tag (shared by every path's epilogue).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn finish_tag<B: crate::poly1305::Backend>(
     poly: &mut Poly<B>,
@@ -202,7 +197,6 @@ unsafe fn finish_tag<B: crate::poly1305::Backend>(
 // feature-less context every SIMD intrinsic would degrade to an out-of-line
 // call (observed as ~30 cycles/byte — see the note in backend/*).
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn seal<O: Ops>(state: &mut State, aad: &[u8], msg: &mut [u8], tag_out: &mut [u8; 16]) {
     debug_assert!(
@@ -216,7 +210,6 @@ pub(crate) fn seal<O: Ops>(state: &mut State, aad: &[u8], msg: &mut [u8], tag_ou
 /// Fused open (MAC + decrypt). Returns `false` on tag mismatch; `buf`
 /// contents are unspecified in that case.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) fn open<O: Ops>(state: &mut State, aad: &[u8], buf: &mut [u8], tag: &[u8; 16]) -> bool {
     debug_assert!(
@@ -232,7 +225,6 @@ pub(crate) fn open<O: Ops>(state: &mut State, aad: &[u8], buf: &mut [u8], tag: &
 /// Shared fused pipeline. `SEAL` selects the per-chunk phase order:
 /// seal = xor then MAC (MAC eats the produced ciphertext), open = MAC then
 /// xor (MAC eats the received ciphertext).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn process<O: Ops, const SEAL: bool>(
     state: &mut State,

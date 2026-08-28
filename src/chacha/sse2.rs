@@ -17,7 +17,6 @@ pub(crate) const BATCH_BLOCKS: usize = 4;
 
 /// Load the state rows [a, b, c]; word 12 (block counter) sits in row d and
 /// is materialized separately by [`ctr_row`].
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rows(state: &State) -> [__m128i; 3] {
     let p = state.words.as_ptr().cast::<__m128i>();
@@ -29,7 +28,6 @@ unsafe fn rows(state: &State) -> [__m128i; 3] {
 }
 
 /// Row d (counter || nonce) with the block counter set to `base + k`.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn ctr_row(state: &State, base: u32, k: u32) -> __m128i {
     let w = state.words;
@@ -84,7 +82,6 @@ macro_rules! to_rows {
 }
 
 /// Full 20 rounds + feed-forward add on 4 blocks (256 bytes of keystream).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds4(v: &[__m128i; 3], ctrs: &[__m128i; 4]) -> [[__m128i; 4]; BATCH_BLOCKS] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
@@ -139,7 +136,6 @@ unsafe fn rounds4(v: &[__m128i; 3], ctrs: &[__m128i; 4]) -> [[__m128i; 4]; BATCH
 
 /// Full 20 rounds + feed-forward on 2 interleaved blocks (the OpenSSL
 /// `ChaCha20_128` shape: dedicated 2-block kernel, no loop machinery).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds2(v: &[__m128i; 3], ctrs: &[__m128i; 2]) -> [[__m128i; 4]; 2] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
@@ -171,7 +167,6 @@ unsafe fn rounds2(v: &[__m128i; 3], ctrs: &[__m128i; 2]) -> [[__m128i; 4]; 2] {
 }
 
 /// XOR one finished block's rows into `buf` (64 bytes).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_xor_block(quad: &[__m128i; 4], buf: *mut u8) {
     let p = buf.cast::<__m128i>();
@@ -182,7 +177,6 @@ unsafe fn emit_xor_block(quad: &[__m128i; 4], buf: *mut u8) {
 }
 
 /// Generate 4 keystream blocks and XOR them into `buf` (256 bytes).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
     let v = rows(state);
@@ -203,7 +197,6 @@ pub(crate) unsafe fn xor_batch4(state: &mut State, buf: *mut u8) {
 }
 
 /// Two-block (128-byte) batch — the OpenSSL `ChaCha20_128` tier.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_pair(state: &mut State, buf: *mut u8) {
     let v = rows(state);
@@ -221,7 +214,6 @@ pub(crate) unsafe fn xor_pair(state: &mut State, buf: *mut u8) {
 /// Fused prologue: blocks 0 and 1 in one interleaved kernel call — block
 /// 0's first 32 bytes (the Poly1305 one-time key) to `key_out`, block 1's
 /// keystream XORed into `b1` (a zeroed buffer yields the raw keystream).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let v = rows(state);
@@ -243,7 +235,6 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 /// Small-message fused op — same contract as the avx2 kernel's
 /// `gen_ks_small` (block 0's first 32 bytes → one-time key, raw message
 /// keystream blocks written to `ks`, one kernel call).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
@@ -292,7 +283,6 @@ pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks:
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let [a, b, c, d] = rounds1(state);
@@ -304,7 +294,6 @@ pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
 }
 
 /// Single-block (64-byte) kernel: one block in 4 XMM registers.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     let [a, b, c, d] = rounds1(state);
@@ -314,7 +303,6 @@ pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
 }
 
 /// 20 rounds + feed-forward on a single block, returned as rows.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds1(state: &State) -> [__m128i; 4] {
     let p = state.words.as_ptr().cast::<__m128i>();

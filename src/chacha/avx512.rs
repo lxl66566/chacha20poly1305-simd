@@ -21,7 +21,6 @@ use crate::chacha::{BLOCK, State};
 pub(crate) const BATCH_BLOCKS: usize = 16;
 
 /// Load the constant/key rows of `state` broadcast into both 128-bit lanes.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rows(state: &State) -> [__m256i; 3] {
     let p = state.words.as_ptr().cast::<__m128i>();
@@ -35,7 +34,6 @@ unsafe fn rows(state: &State) -> [__m256i; 3] {
 /// Counter row for quad `k`: `[c0, w13, w14, w15 | c0+1, w13, w14, w15]`
 /// where `c0 = base + 2k`. Built directly (the broadcast+add form double
 /// counts `w12`, which only worked by accident at counter 0).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn ctr_row(state: &State, base: u32, k: usize) -> __m256i {
     let w = state.words;
@@ -96,7 +94,6 @@ macro_rules! to_rows {
 
 /// Full 20 rounds + feed-forward add on 4 quads (8 blocks), state held in
 /// 16 explicit locals so it stays in registers.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
@@ -150,7 +147,6 @@ unsafe fn rounds4(v: &[__m256i; 3], ctrs: &[__m256i; 4]) -> [[__m256i; 4]; 4] {
 }
 
 /// Single-quad (2-block) variant of [`rounds4`].
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
     let (mut a, mut b, mut c, mut d) = (v[0], v[1], v[2], ctr);
@@ -170,7 +166,6 @@ unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
 
 /// Two-quad (4-block) variant of [`rounds4`] — the OpenSSL 4x ladder tier
 /// for 256..511-byte tails.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
     let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
@@ -202,7 +197,6 @@ unsafe fn rounds2(v: &[__m256i; 3], ctrs: &[__m256i; 2]) -> [[__m256i; 4]; 2] {
 }
 
 /// Assemble one 64-byte block from finalized rows: `[a|b]` and `[c|d]`.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_lo(a: __m256i, b: __m256i, block: usize) -> __m256i {
     match block {
@@ -211,7 +205,6 @@ unsafe fn emit_lo(a: __m256i, b: __m256i, block: usize) -> __m256i {
     }
 }
 
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn emit_hi(c: __m256i, d: __m256i, block: usize) -> __m256i {
     match block {
@@ -224,7 +217,6 @@ unsafe fn emit_hi(c: __m256i, d: __m256i, block: usize) -> __m256i {
 /// (`buf.len() == BATCH_BLOCKS * BLOCK`), advancing the counter.
 ///
 /// Counter wrap-around mirrors upstream wrapping semantics at u32.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
     let v = rows(state);
@@ -254,7 +246,6 @@ pub(crate) unsafe fn xor_batch8(state: &mut State, buf: *mut u8) {
 }
 
 /// Two-block (128-byte) batch for mid-size tails.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
     let v = rows(state);
@@ -273,7 +264,6 @@ pub(crate) unsafe fn xor_quad(state: &mut State, mut buf: *mut u8) {
 }
 
 /// Four-block (256-byte) batch — 2 interleaved quads in one kernel call.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_quad2(state: &mut State, mut buf: *mut u8) {
     let v = rows(state);
@@ -298,7 +288,6 @@ pub(crate) unsafe fn xor_quad2(state: &mut State, mut buf: *mut u8) {
 /// Fused prologue: blocks 0 and 1 in one quad call — block 0's first 32
 /// bytes (the Poly1305 one-time key) to `key_out`, block 1's keystream
 /// XORed into `b1` (a zeroed buffer yields the raw keystream).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8; BLOCK]) {
     let v = rows(state);
@@ -331,7 +320,6 @@ pub(crate) unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1:
 /// Small-message fused op — same contract as the avx2 kernel's
 /// `gen_ks_small` (block 0's first 32 bytes → one-time key, raw message
 /// keystream blocks written to `ks`, one kernel call).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_ks_small(state: &mut State, key_out: &mut [u8; 32], ks: &mut [u8]) {
     debug_assert!(ks.len() <= 3 * BLOCK && ks.len().is_multiple_of(BLOCK));
@@ -1111,7 +1099,6 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
 }
 
 /// Single-block (64-byte) kernel in XMM registers.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     let p = state.words.as_ptr().cast::<__m128i>();
@@ -1151,7 +1138,6 @@ pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
     _mm_storeu_si128(buf.add(48).cast(), _mm_xor_si128(pt3, d));
 }
 
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn quarter(a: &mut __m128i, b: &mut __m128i, c: &mut __m128i, d: &mut __m128i) {
     *a = _mm_add_epi32(*a, *b);
@@ -1171,7 +1157,6 @@ unsafe fn quarter(a: &mut __m128i, b: &mut __m128i, c: &mut __m128i, d: &mut __m
 /// Generate exactly one keystream block (no XOR, no advance). Test
 /// reference target only — the engine uses the fused [`gen_key_xor2`].
 #[cfg(test)]
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn gen_block(state: &State, out: &mut [u8; BLOCK]) {
     let p = state.words.as_ptr().cast::<__m128i>();

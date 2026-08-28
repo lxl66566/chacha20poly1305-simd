@@ -53,7 +53,6 @@ struct X2 {
 }
 
 impl X2 {
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn mul(a: uint32x4_t, c: uint32x4_t) -> Self {
         Self {
@@ -62,14 +61,12 @@ impl X2 {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn acc(&mut self, a: uint32x4_t, c: uint32x4_t) {
         self.lo = vaddq_u64(self.lo, vmull_u32(vget_low_u32(a), vget_low_u32(c)));
         self.hi = vaddq_u64(self.hi, vmull_high_u32(a, c));
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn add(self, o: Self) -> Self {
         Self {
@@ -78,7 +75,6 @@ impl X2 {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn shr26(self) -> Self {
         Self {
@@ -87,7 +83,6 @@ impl X2 {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn mask26(self) -> Self {
         let m = vdupq_n_u64(0x03ff_ffff);
@@ -98,7 +93,6 @@ impl X2 {
     }
 
     /// ×5 as `(x << 2) + x` (no 64-bit lane multiply in NEON).
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn mul5(self) -> Self {
         let s4 = Self {
@@ -108,7 +102,6 @@ impl X2 {
         self.add(s4)
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn narrow(self) -> uint32x4_t {
         vcombine_u32(vmovn_u64(self.lo), vmovn_u64(self.hi))
@@ -119,7 +112,6 @@ impl X2 {
 /// must not carry this step's r⁴).
 // Free fn with `&mut Lanes` (not a closure): keep the intrinsics inlinable
 // on the hot absorb4 path, mirroring the AVX2 backend's note.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn step(l: &mut Lanes, blocks: &[uint32x4_t; 5]) {
     let h = l.h;
@@ -181,7 +173,6 @@ unsafe fn step(l: &mut Lanes, blocks: &[uint32x4_t; 5]) {
 }
 
 /// Split 4 blocks (64 bytes) into 26-bit limbs, lane = block, high bit set.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 unsafe fn load4(blocks: &[u8; 64]) -> [uint32x4_t; 5] {
     let p = blocks.as_ptr().cast::<u32>();
@@ -221,7 +212,6 @@ unsafe fn load4(blocks: &[u8; 64]) -> [uint32x4_t; 5] {
 }
 
 /// Scalar 26-bit limbs of a single block (high bit set) for the cold paths.
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 fn block_limbs(block: &[u8; 16]) -> [u32; 5] {
     let w = |i: usize| u32::from_le_bytes(block[i..i + 4].try_into().unwrap());
@@ -235,7 +225,6 @@ fn block_limbs(block: &[u8; 16]) -> [u32; 5] {
 }
 
 /// Limb-wise add (slack is absorbed by the next `mul_r` / final carry).
-#[cfg_attr(debug_assertions, inline)]
 #[cfg_attr(not(debug_assertions), inline(always))]
 fn add_limbs(a: [u32; 5], b: [u32; 5]) -> [u32; 5] {
     let mut out = [0u32; 5];
@@ -247,7 +236,6 @@ fn add_limbs(a: [u32; 5], b: [u32; 5]) -> [u32; 5] {
 
 impl NeonPoly {
     /// Ensure the R⁴ power rows exist, then run one step.
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn step_init(&mut self, blocks: &[uint32x4_t; 5]) {
         if self.lanes.is_none() {
@@ -279,7 +267,6 @@ impl NeonPoly {
 
     /// Fold the whole deferred cache into the lane state, in order.
     /// `num_cached` must be a multiple of 4.
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn drain_cache(&mut self) {
         debug_assert_eq!(self.num_cached % 4, 0);
@@ -294,7 +281,6 @@ impl NeonPoly {
 }
 
 impl Backend for NeonPoly {
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn init(key: &[u8; 32]) -> Self {
         let (r, k) = parse_key(key);
@@ -309,7 +295,6 @@ impl Backend for NeonPoly {
         }
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb_block(&mut self, block: &[u8; 16]) {
         if self.num_cached == 8 {
@@ -321,7 +306,6 @@ impl Backend for NeonPoly {
         self.num_cached += 1;
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn absorb4(&mut self, blocks: &[u8; 64]) {
         // The engine's alignment prologue guarantees the deferred cache
@@ -331,7 +315,6 @@ impl Backend for NeonPoly {
         self.step_init(&load4(blocks));
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn pending_blocks(&self) -> usize {
         self.num_cached
@@ -353,7 +336,6 @@ impl Backend for NeonPoly {
         self.num_cached = 0;
     }
 
-    #[cfg_attr(debug_assertions, inline)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn finalize_into(&mut self, out: &mut [u8; 16]) {
         debug_assert!(self.num_cached <= 8);
