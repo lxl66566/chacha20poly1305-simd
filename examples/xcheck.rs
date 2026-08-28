@@ -10,7 +10,7 @@
 #![allow(clippy::cast_possible_truncation)]
 
 use chacha20poly1305_simd::{ChaCha20Poly1305, Payload, XChaCha20Poly1305};
-use rustcrypto::aead::{Aead, AeadInOut, KeyInit};
+use rustcrypto::aead::{Aead, AeadInOut, KeyInit, Payload as RcPayload, inout::InOutBuf};
 
 /// xorshift64* — deterministic across hosts so failures are reproducible.
 struct Rng(u64);
@@ -76,7 +76,7 @@ fn check(case: usize, r: &mut Rng) {
         .encrypt_inout_detached(
             &rustcrypto::Nonce::from(nonce),
             &aad,
-            rustcrypto::aead::inout::InOutBuf::from(&mut their_buf[..]),
+            InOutBuf::from(&mut their_buf[..]),
         )
         .unwrap();
     assert_eq!(ours_buf, their_buf, "ct mismatch (case {case})");
@@ -105,7 +105,7 @@ fn check(case: usize, r: &mut Rng) {
     let their_ok = theirs.decrypt_inout_detached(
         &rustcrypto::Nonce::from(nonce),
         &bad_aad,
-        rustcrypto::aead::inout::InOutBuf::from(&mut their_dec[..]),
+        InOutBuf::from(&mut their_dec[..]),
         &rustcrypto::Tag::from(tag),
     );
     match (ours_ok, their_ok) {
@@ -124,13 +124,10 @@ fn check(case: usize, r: &mut Rng) {
         })
         .unwrap();
     let ct_theirs = theirs_x
-        .encrypt(
-            &rustcrypto::XNonce::from(xnonce),
-            rustcrypto::aead::Payload {
-                msg: &msg,
-                aad: &aad,
-            },
-        )
+        .encrypt(&rustcrypto::XNonce::from(xnonce), RcPayload {
+            msg: &msg,
+            aad: &aad,
+        })
         .unwrap();
     assert_eq!(ct_ours, ct_theirs, "xchacha ct mismatch (case {case})");
     assert_eq!(

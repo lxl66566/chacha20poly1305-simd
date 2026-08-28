@@ -8,7 +8,7 @@
 use chacha20poly1305_simd::{
     ChaCha20Poly1305, Error, Key, Nonce, Payload, Tag, XChaCha20Poly1305, XNonce, active_backend,
 };
-use rustcrypto::aead::{AeadInOut, KeyInit};
+use rustcrypto::aead::{AeadInOut, KeyInit, inout::InOutBuf};
 
 const KEY: Key = [
     0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
@@ -291,11 +291,7 @@ fn differential_vs_rustcrypto() {
                 .unwrap();
             let mut their_buf = msg.clone();
             let rc_tag = rc
-                .encrypt_inout_detached(
-                    &rc_nonce,
-                    &aad,
-                    rustcrypto::aead::inout::InOutBuf::from(&mut their_buf[..]),
-                )
+                .encrypt_inout_detached(&rc_nonce, &aad, InOutBuf::from(&mut their_buf[..]))
                 .unwrap();
             assert_eq!(ours_buf, their_buf, "ct len {len} aad {aad_len}");
             assert_eq!(
