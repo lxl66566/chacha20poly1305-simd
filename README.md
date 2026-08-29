@@ -106,7 +106,7 @@ Speedup:
 ## Verification
 
 - RFC 8439 and XChaCha official test vectors (`cargo test`)
-- Differential fuzzing against the RustCrypto implementation (`fuzz/run.sh`), asserting byte-exact ciphertext/tag equality and identical open verdicts. On x86_64 (soft/sse2/avx2/avx512 in parallel, 40 min per backend): 226 million executions in the latest run (soft 45.9M / sse2 48.9M / avx2 68.0M / avx512 63.5M), cumulative > 430 million executions, 0 crashes.
+- Differential fuzzing against the RustCrypto implementation (`fuzz/run.sh`), asserting byte-exact ciphertext/tag equality and identical open verdicts. On x86_64 (soft/sse2/avx2/avx512 in parallel, 32 cores fully loaded, 5.5 h per backend): 1.57 billion executions in the latest run (soft 300.6M / sse2 369.6M / avx2 466.7M / avx512 437.3M), cumulative > 2 billion executions, 0 crashes.
 - aarch64 cross-validation under QEMU user mode: randomized differential testing via `cargo run --release --example xcheck -- [iterations] [seed]`; the NEON backend passed 500 thousand differential cases under QEMU
 
 ## License
