@@ -113,6 +113,46 @@ pub(crate) trait Ops {
         let _ = (state, msg, poly);
         (off, poly_off)
     }
+
+    /// Whether the backend provides fused medium-size bulk runs
+    /// ([`Ops::seal_medium`] / [`Ops::open_medium`]): 512-byte-interleaved
+    /// cipher+MAC for the region the 16-block fused loop never reaches
+    /// (its entry needs ≥ batch bytes remaining after the prologue, i.e.
+    /// messages ≳ 2 KiB). Below that the generic tail runs the cipher and
+    /// the MAC serially — the dominant sub-2 KiB cost.
+    const FUSED_MEDIUM: bool = false;
+
+    /// Fused medium seal run: interleave the cipher for `[off, len)` with
+    /// the MAC over already-written ciphertext, BoringSSL
+    /// `chacha20_poly1305_seal_avx2` style. Called after the bulk loop with
+    /// `off < msg.len()`; returns the new `(off, poly_off)`. Default: no-op.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn seal_medium(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let _ = (state, msg, poly);
+        (off, poly_off)
+    }
+
+    /// Fused medium open run: same contract for open (the MAC must read
+    /// pristine ciphertext, so it leads the xor cursor). Called after the
+    /// bulk loop while `off < msg.len() || poly_off < msg.len()`.
+    /// Default: no-op.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn open_medium(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        let _ = (state, msg, poly);
+        (off, poly_off)
+    }
 }
 
 /// Largest message the IETF 32-bit counter can address (256 GiB - 64 KiB).
@@ -407,6 +447,11 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                     }
                 }
                 // Poly-leads step (the whole body for non-fused backends).
+                if O::FUSED_MEDIUM {
+                    // The medium fused path below interleaves the rest with
+                    // a tighter 512-byte cadence; skip the generic catch-up.
+                    break;
+                }
                 let ahead = (off + 2 * batch).min(msg.len());
                 if poly_off < ahead {
                     let n = (ahead - poly_off) & !(BLOCK - 1);
@@ -433,6 +478,22 @@ unsafe fn process<O: Ops, const SEAL: bool>(
             }
         }
 
+        // ── Medium fused path ──
+        // The 16-block bulk loop above only fuses when ≥ batch bytes remain
+        // (message ≳ 2 KiB); below that the generic tail would run cipher
+        // and MAC serially. Backends with a 512-byte fused medium take over
+        // here (BoringSSL's sub-batch shape: cipher-ahead, then
+        // interleaved iterations whose MAC lags one batch).
+        if O::FUSED_MEDIUM && (off < msg.len() || (!SEAL && poly_off < msg.len())) {
+            let (no, np) = if SEAL {
+                O::seal_medium(state, msg, off, poly_off, &mut poly)
+            } else {
+                O::open_medium(state, msg, off, poly_off, &mut poly)
+            };
+            off = no;
+            poly_off = np;
+        }
+
         // Tail: xor / absorb the remainder (may be up to batch-1 bytes).
         // First drain the bulk windows the pipelined seal absorb deferred
         // (poly_off may lag `off` by up to one batch).
@@ -447,14 +508,14 @@ unsafe fn process<O: Ops, const SEAL: bool>(
             if SEAL {
                 O::chacha_xor(state, &mut msg[off..]);
             }
-            poly.update(&msg[poly_off..]);
+            poly.update_tail(&msg[poly_off..]);
             if !SEAL {
                 O::chacha_xor(state, &mut msg[off..]);
             }
             off = msg.len();
             poly_off = msg.len();
         } else if poly_off < msg.len() {
-            poly.update(&msg[poly_off..]);
+            poly.update_tail(&msg[poly_off..]);
             poly_off = msg.len();
         }
         debug_assert_eq!(off, msg.len());

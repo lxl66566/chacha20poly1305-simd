@@ -80,6 +80,7 @@ impl Ops for Avx512IfmaOps {
     type Poly = crate::poly1305::ifma::IfmaPoly;
 
     const CHACHA_BATCH: usize = crate::chacha::avx512::BATCH_BLOCKS;
+    const FUSED_MEDIUM: bool = true;
     const FUSED_OPEN: bool = true;
 
     #[cfg_attr(not(debug_assertions), inline(always))]
@@ -134,6 +135,48 @@ impl Ops for Avx512IfmaOps {
         // SAFETY: callers reached this through the ifma entry points.
         unsafe {
             crate::chacha::avx512::xor_batch16_open_bulk(
+                state,
+                msg.as_mut_ptr(),
+                off,
+                poly_off,
+                msg.len(),
+                poly.inner_mut(),
+            )
+        }
+    }
+
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn seal_medium(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut crate::poly1305::Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        // SAFETY: callers reached this through the ifma entry points.
+        unsafe {
+            crate::chacha::avx512::seal_medium(
+                state,
+                msg.as_mut_ptr(),
+                off,
+                poly_off,
+                msg.len(),
+                poly.inner_mut(),
+            )
+        }
+    }
+
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn open_medium(
+        state: &mut State,
+        msg: &mut [u8],
+        off: usize,
+        poly_off: usize,
+        poly: &mut crate::poly1305::Poly<Self::Poly>,
+    ) -> (usize, usize) {
+        // SAFETY: callers reached this through the ifma entry points.
+        unsafe {
+            crate::chacha::avx512::open_medium(
                 state,
                 msg.as_mut_ptr(),
                 off,
@@ -222,6 +265,83 @@ mod tests {
             (1088, 16),
             (2048, 0),
             (4097, 5),
+            // Medium-path boundaries: phase A threshold, fused-C rounds
+            // 0..=4, block-alignment edges, the steady-loop entry/exit, and
+            // the 16-block fused loop hand-off around 2 KiB.
+            (193, 0),
+            (193, 16),
+            (255, 16),
+            (256, 0),
+            (319, 16),
+            (320, 0),
+            (383, 16),
+            (384, 1),
+            (447, 32),
+            (448, 16),
+            (449, 0),
+            (511, 16),
+            (512, 1),
+            (575, 0),
+            (576, 0),
+            (576, 1),
+            (576, 16),
+            (577, 16),
+            (639, 16),
+            (640, 0),
+            (640, 16),
+            (641, 16),
+            (703, 0),
+            (704, 32),
+            (767, 16),
+            (768, 0),
+            (831, 16),
+            (832, 5),
+            (959, 16),
+            (960, 0),
+            (1024, 0),
+            (1024, 32),
+            (1087, 16),
+            (1088, 0),
+            (1089, 16),
+            (1152, 16),
+            (1216, 0),
+            (1279, 16),
+            (1536, 16),
+            (1600, 0),
+            (1984, 16),
+            (2047, 16),
+            (2048, 16),
+            (2049, 0),
+            (2111, 16),
+            (2112, 0),
+            (2112, 16),
+            (2113, 1),
+            (2176, 16),
+            (3072, 64),
+            (4096, 16),
+            (8192, 48),
+            // AAD sizes driving the flush/pairing guard (s = 0/16/32/48)
+            // plus cached-8 flush cases.
+            (640, 3),
+            (640, 15),
+            (640, 17),
+            (640, 33),
+            (640, 47),
+            (640, 48),
+            (640, 49),
+            (640, 63),
+            (640, 64),
+            (640, 65),
+            (640, 79),
+            (640, 80),
+            (640, 81),
+            (1024, 3),
+            (1024, 47),
+            (1024, 65),
+            (1024, 79),
+            (1024, 80),
+            (1024, 128),
+            (1024, 129),
         ] {
             let msg: Vec<u8> = (0..len).map(|i| (i * 37 + 3) as u8).collect();
             let aad: Vec<u8> = (0..aad_len).map(|i| (i * 41 + 1) as u8).collect();
@@ -261,6 +381,59 @@ mod tests {
             (1025, 12),
             (2048, 0),
             (4097, 5),
+            // Medium fused-path boundaries (phase A threshold, fused-C
+            // rounds 0..=4, block-alignment edges, steady-loop entry/exit,
+            // 16-block loop hand-off).
+            (193, 0),
+            (193, 16),
+            (256, 16),
+            (320, 0),
+            (384, 16),
+            (448, 1),
+            (511, 16),
+            (575, 0),
+            (576, 0),
+            (576, 1),
+            (576, 16),
+            (577, 16),
+            (640, 0),
+            (640, 16),
+            (641, 16),
+            (704, 32),
+            (768, 0),
+            (832, 5),
+            (960, 16),
+            (1024, 0),
+            (1024, 32),
+            (1088, 0),
+            (1089, 16),
+            (1216, 0),
+            (1536, 16),
+            (2047, 16),
+            (2048, 16),
+            (2049, 0),
+            (2112, 0),
+            (2112, 16),
+            (2113, 1),
+            (3072, 64),
+            (8192, 48),
+            // AAD sizes driving the flush/pairing guards.
+            (640, 3),
+            (640, 15),
+            (640, 17),
+            (640, 47),
+            (640, 48),
+            (640, 63),
+            (640, 64),
+            (640, 65),
+            (640, 79),
+            (640, 80),
+            (640, 81),
+            (1024, 3),
+            (1024, 65),
+            (1024, 80),
+            (1024, 128),
+            (1024, 129),
         ] {
             let msg: Vec<u8> = (0..len).map(|i| (i * 37 + 3) as u8).collect();
             let aad: Vec<u8> = (0..aad_len).map(|i| (i * 41 + 1) as u8).collect();

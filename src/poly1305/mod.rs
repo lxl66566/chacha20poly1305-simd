@@ -154,6 +154,28 @@ impl<B: Backend> Poly<B> {
         unsafe { self.inner.absorb_blocks(blocks) };
     }
 
+    /// Tail absorb: whole 64-byte windows through the wide
+    /// [`Self::absorb_blocks`] path, the `< 64`-byte remainder through
+    /// [`Self::update`]. The stream must sit at a 64-byte boundary with no
+    /// partial block buffered (the engine's bulk cursors guarantee both).
+    ///
+    /// Without this, an unfused tail of N bytes costs N/16 `absorb_block`
+    /// copies (16 bytes into the backend's block cache each) plus a
+    /// store→load round trip when the cache drains — measured as a large
+    /// share of the sub-2 KiB seal cost.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub(crate) unsafe fn update_tail(&mut self, data: &[u8]) {
+        debug_assert_eq!(self.have, 0);
+        debug_assert_eq!(self.inner.pending_blocks() % 4, 0);
+        let bulk = data.len() - data.len() % 64;
+        if bulk > 0 {
+            unsafe { self.absorb_blocks(&data[..bulk]) };
+        }
+        if bulk < data.len() {
+            unsafe { self.update(&data[bulk..]) };
+        }
+    }
+
     /// Whole blocks not yet folded: batched blocks plus an implicit one if a
     /// partial block is buffered. The engine aligns the bulk stream to
     /// 64-byte boundaries with this.

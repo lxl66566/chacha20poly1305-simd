@@ -1098,6 +1098,569 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
     (off, poly_off)
 }
 
+// ── Fused medium-size kernels (512-byte quad batches + IFMA MAC) ──
+//
+// The 16-block fused loops above only engage once ≥ 1024 bytes remain past
+// the engine prologue (message ≳ 2 KiB); below that the generic tail ran
+// cipher and MAC serially — the dominant sub-2 KiB cost (see
+// perf/1kib-gap-analysis.md). These kernels port BoringSSL's
+// `chacha20_poly1305_seal_avx2` sub-batch shape: a cipher-ahead batch seeds
+// a one-batch MAC lag, then 8-block quad rounds run with IFMA `mul_reduce`
+// rounds woven between the double rounds, reading only ciphertext written
+// by earlier batches (no store→load-forwarding hazards). A final partial
+// batch stores through byte masks, so any tail length is covered without a
+// scalar fallback.
+
+/// One double round over four quads (8 blocks) — the [`rounds4`] loop body.
+macro_rules! dr8q {
+    (
+        $a0:ident,
+        $b0:ident,
+        $c0:ident,
+        $d0:ident,
+        $a1:ident,
+        $b1:ident,
+        $c1:ident,
+        $d1:ident,
+        $a2:ident,
+        $b2:ident,
+        $c2:ident,
+        $d2:ident,
+        $a3:ident,
+        $b3:ident,
+        $c3:ident,
+        $d3:ident
+    ) => {{
+        qr!($a0, $b0, $c0, $d0);
+        qr!($a1, $b1, $c1, $d1);
+        qr!($a2, $b2, $c2, $d2);
+        qr!($a3, $b3, $c3, $d3);
+        to_cols!($a0, $b0, $c0, $d0);
+        to_cols!($a1, $b1, $c1, $d1);
+        to_cols!($a2, $b2, $c2, $d2);
+        to_cols!($a3, $b3, $c3, $d3);
+        qr!($a0, $b0, $c0, $d0);
+        qr!($a1, $b1, $c1, $d1);
+        qr!($a2, $b2, $c2, $d2);
+        qr!($a3, $b3, $c3, $d3);
+        to_rows!($a0, $b0, $c0, $d0);
+        to_rows!($a1, $b1, $c1, $d1);
+        to_rows!($a2, $b2, $c2, $d2);
+        to_rows!($a3, $b3, $c3, $d3);
+    }};
+}
+
+/// 8-block quad rounds with up to eight IFMA poly rounds woven after
+/// double-rounds 1..=8, then the feed-forward against the original row and
+/// counter registers. `$n` (runtime, 0..=8) of the `$pr` slots fire; `$pr`
+/// is the caller's poly-round macro (capturing `pptr`, `h0..h2` and the
+/// hoisted power registers).
+macro_rules! rounds8_fused {
+    (
+        $n:expr,
+        $v0:expr,
+        $v1:expr,
+        $v2:expr,
+        $pr:ident,
+        $od0:expr,
+        $od1:expr,
+        $od2:expr,
+        $od3:expr,
+        $a0:ident,
+        $b0:ident,
+        $c0:ident,
+        $d0:ident,
+        $a1:ident,
+        $b1:ident,
+        $c1:ident,
+        $d1:ident,
+        $a2:ident,
+        $b2:ident,
+        $c2:ident,
+        $d2:ident,
+        $a3:ident,
+        $b3:ident,
+        $c3:ident,
+        $d3:ident
+    ) => {{
+        let n = $n;
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 0 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 1 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 2 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 3 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 4 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 5 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 6 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        if n > 7 {
+            $pr!();
+        }
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        dr8q!(
+            $a0, $b0, $c0, $d0, $a1, $b1, $c1, $d1, $a2, $b2, $c2, $d2, $a3, $b3, $c3, $d3
+        );
+        $a0 = _mm256_add_epi32($a0, $v0);
+        $b0 = _mm256_add_epi32($b0, $v1);
+        $c0 = _mm256_add_epi32($c0, $v2);
+        $d0 = _mm256_add_epi32($d0, $od0);
+        $a1 = _mm256_add_epi32($a1, $v0);
+        $b1 = _mm256_add_epi32($b1, $v1);
+        $c1 = _mm256_add_epi32($c1, $v2);
+        $d1 = _mm256_add_epi32($d1, $od1);
+        $a2 = _mm256_add_epi32($a2, $v0);
+        $b2 = _mm256_add_epi32($b2, $v1);
+        $c2 = _mm256_add_epi32($c2, $v2);
+        $d2 = _mm256_add_epi32($d2, $od2);
+        $a3 = _mm256_add_epi32($a3, $v0);
+        $b3 = _mm256_add_epi32($b3, $v1);
+        $c3 = _mm256_add_epi32($c3, $v2);
+        $d3 = _mm256_add_epi32($d3, $od3);
+    }};
+}
+
+/// XOR-store one 64-byte block (row registers of one quad, `lane` 0|1) with
+/// `k` bytes written (`k == BLOCK`: plain stores; `k < BLOCK`: AVX-512VL
+/// masked stores, so partial tails never touch memory past the message).
+#[cfg_attr(not(debug_assertions), inline(always))]
+unsafe fn store_blk(
+    buf: *mut u8,
+    idx: usize,
+    a: __m256i,
+    b: __m256i,
+    c: __m256i,
+    d: __m256i,
+    lane: usize,
+    k: usize,
+) {
+    unsafe {
+        let lo = emit_lo(a, b, lane);
+        let hi = emit_hi(c, d, lane);
+        let p = buf.add(idx * BLOCK);
+        if k == BLOCK {
+            _mm256_storeu_si256(p.cast(), _mm256_xor_si256(_mm256_loadu_si256(p.cast()), lo));
+            _mm256_storeu_si256(
+                p.add(32).cast(),
+                _mm256_xor_si256(_mm256_loadu_si256(p.add(32).cast()), hi),
+            );
+        } else {
+            let (k0, k1) = (k.min(32), k - k.min(32));
+            if k0 > 0 {
+                let m = ((1u64 << k0) - 1) as __mmask32;
+                _mm256_mask_storeu_epi8(
+                    p.cast(),
+                    m,
+                    _mm256_xor_si256(_mm256_loadu_si256(p.cast()), lo),
+                );
+            }
+            if k1 > 0 {
+                let m = ((1u64 << k1) - 1) as __mmask32;
+                _mm256_mask_storeu_epi8(
+                    p.add(32).cast(),
+                    m,
+                    _mm256_xor_si256(_mm256_loadu_si256(p.add(32).cast()), hi),
+                );
+            }
+        }
+    }
+}
+
+/// XOR-store both blocks of one finalized quad (128 bytes at `buf`).
+#[cfg_attr(not(debug_assertions), inline(always))]
+unsafe fn store_quad(buf: *mut u8, a: __m256i, b: __m256i, c: __m256i, d: __m256i) {
+    unsafe {
+        store_blk(buf, 0, a, b, c, d, 0, BLOCK);
+        store_blk(buf, 1, a, b, c, d, 1, BLOCK);
+    }
+}
+
+/// XOR-store `nfull` whole blocks plus a `k`-byte masked partial block
+/// (`k < 64`) from four finalized quads, covering any 1..=511-byte tail.
+/// The runtime `nfull` indexing forces a one-time register spill — fine at
+/// once per message.
+#[cfg_attr(not(debug_assertions), inline(always))]
+#[allow(clippy::too_many_arguments)]
+unsafe fn emit_partial(
+    buf: *mut u8,
+    nfull: usize,
+    k: usize,
+    a0: __m256i,
+    b0: __m256i,
+    c0: __m256i,
+    d0: __m256i,
+    a1: __m256i,
+    b1: __m256i,
+    c1: __m256i,
+    d1: __m256i,
+    a2: __m256i,
+    b2: __m256i,
+    c2: __m256i,
+    d2: __m256i,
+    a3: __m256i,
+    b3: __m256i,
+    c3: __m256i,
+    d3: __m256i,
+) {
+    let quads: [(__m256i, __m256i, __m256i, __m256i); 4] = [
+        (a0, b0, c0, d0),
+        (a1, b1, c1, d1),
+        (a2, b2, c2, d2),
+        (a3, b3, c3, d3),
+    ];
+    for b in 0..nfull {
+        let (a, bb, c, d) = quads[b / 2];
+        unsafe { store_blk(buf, b, a, bb, c, d, b % 2, BLOCK) };
+    }
+    if k > 0 {
+        let (a, bb, c, d) = quads[nfull / 2];
+        unsafe { store_blk(buf, nfull, a, bb, c, d, nfull % 2, k) };
+    }
+}
+
+/// Fused medium-size seal (requires AVX-512F+VL+IFMA at runtime).
+///
+/// Phase A encrypts one 512-byte batch ahead (seeding the one-batch MAC lag
+/// BoringSSL's assembly uses), the cached MAC blocks are folded against
+/// already-written ciphertext, and a final partial batch runs the quad
+/// rounds with the remaining IFMA MAC rounds woven between the double
+/// rounds. Its last block stores through a byte mask, so any tail length is
+/// covered without a scalar fallback; the counter advances by the blocks
+/// actually stored.
+///
+/// Caller contract (engine-maintained): `off < len`, `poly_off <= off`, the
+/// whole-block cache is a multiple of 4, and the MAC stream sits at a
+/// 64-byte boundary at `poly_off`.
+#[target_feature(enable = "avx512f,avx512vl,avx512ifma")]
+#[inline(never)]
+pub(crate) unsafe fn seal_medium(
+    state: &mut State,
+    msg: *mut u8,
+    mut off: usize,
+    mut poly_off: usize,
+    len: usize,
+    poly: &mut crate::poly1305::ifma::IfmaPoly,
+) -> (usize, usize) {
+    use crate::poly1305::{
+        Backend,
+        ifma::{load8, mul_reduce},
+    };
+
+    // Phase A: cipher-ahead.
+    if len - off >= 512 {
+        unsafe { xor_batch8(state, msg.add(off)) };
+        off += 512;
+    }
+
+    // Fold the cached half/whole group so the fused rounds below load
+    // straight off the message buffer. The pairing window must already be
+    // ciphertext — written by the prologue or phase A — hence the `<= off`
+    // guard (without phase A there is nothing fresh to pair with; the
+    // generic tail folds the cache instead).
+    match poly.pending_blocks() {
+        4 if poly_off + 64 <= off => {
+            poly.absorb_blocks(unsafe { core::slice::from_raw_parts(msg.add(poly_off), 64) });
+            poly_off += 64;
+        },
+        8 => {
+            poly.absorb_blocks(unsafe { core::slice::from_raw_parts(msg.add(poly_off), 0) });
+        },
+        _ => {},
+    }
+
+    let r = len - off;
+    if r == 0 {
+        return (off, poly_off);
+    }
+    let nfull = r / BLOCK;
+    let k = r % BLOCK;
+    let rounds = ((off - poly_off) / 128).min((len - poly_off) / 128).min(8);
+    // Below ~6 stored blocks the cascade tail beats an 8-block computation
+    // with most of its results discarded.
+    if r < 384 && rounds == 0 {
+        return (off, poly_off);
+    }
+
+    poly.ensure_stream();
+    // SAFETY: just ensured.
+    let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
+        let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
+        (
+            st.h0,
+            st.h1,
+            st.h2,
+            st.powers.b_r0,
+            st.powers.b_r1,
+            st.powers.b_r2,
+            st.powers.b_s1,
+            st.powers.b_s2,
+        )
+    };
+    let v = rows(state);
+    let mut pptr = msg.add(poly_off);
+    macro_rules! pr {
+        () => {{
+            let (t0, t1, t2) = load8(pptr, pptr.add(64));
+            let (g0, g1, g2) = mul_reduce(h0, h1, h2, r0, r1, r2, s1, s2);
+            h0 = _mm512_add_epi64(g0, t0);
+            h1 = _mm512_add_epi64(g1, t1);
+            h2 = _mm512_add_epi64(g2, t2);
+            pptr = pptr.add(128);
+        }};
+    }
+    let base = state.words[12];
+    let od0 = ctr_row(state, base, 0);
+    let od1 = ctr_row(state, base, 1);
+    let od2 = ctr_row(state, base, 2);
+    let od3 = ctr_row(state, base, 3);
+    state.advance((nfull + usize::from(k > 0)) as u32);
+    let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], od0);
+    let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], od1);
+    let (mut a2, mut b2, mut c2, mut d2) = (v[0], v[1], v[2], od2);
+    let (mut a3, mut b3, mut c3, mut d3) = (v[0], v[1], v[2], od3);
+    rounds8_fused!(
+        rounds, v[0], v[1], v[2], pr, od0, od1, od2, od3, a0, b0, c0, d0, a1, b1, c1, d1, a2, b2,
+        c2, d2, a3, b3, c3, d3
+    );
+    // pptr's final increment (inside `pr`) has no later consumer here.
+    let _ = pptr;
+    emit_partial(
+        msg.add(off),
+        nfull,
+        k,
+        a0,
+        b0,
+        c0,
+        d0,
+        a1,
+        b1,
+        c1,
+        d1,
+        a2,
+        b2,
+        c2,
+        d2,
+        a3,
+        b3,
+        c3,
+        d3,
+    );
+    off = len;
+    poly_off += 128 * rounds;
+    // SAFETY: stream ensured above.
+    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
+    st.h0 = h0;
+    st.h1 = h1;
+    st.h2 = h2;
+    (off, poly_off)
+}
+
+/// Fused medium-size open (requires AVX-512F+VL+IFMA at runtime). The MAC
+/// leads (loads pristine ciphertext before the xor cursor reaches it), so
+/// the steady iterations have no ordering hazards at all: poly rounds woven
+/// into the cipher rounds load windows at/past `off` that this iteration's
+/// stores only touch afterwards. When the MAC runs dry before the cipher,
+/// its 64-aligned bulk is absorbed wholesale and plain 8-block batches
+/// finish the encryption; a masked partial batch covers the tail.
+///
+/// Caller contract: `poly_off >= off`, whole-block cache `% 4 == 0`, MAC
+/// stream at a 64-byte boundary at `poly_off`.
+#[target_feature(enable = "avx512f,avx512vl,avx512ifma")]
+#[inline(never)]
+pub(crate) unsafe fn open_medium(
+    state: &mut State,
+    msg: *mut u8,
+    mut off: usize,
+    mut poly_off: usize,
+    len: usize,
+    poly: &mut crate::poly1305::ifma::IfmaPoly,
+) -> (usize, usize) {
+    use crate::poly1305::{
+        Backend,
+        ifma::{load8, mul_reduce},
+    };
+
+    // Fold the cached half/whole group; the pairing window is pristine
+    // ciphertext (the MAC leads the xor cursor).
+    match poly.pending_blocks() {
+        4 if poly_off + 64 <= len => {
+            poly.absorb_blocks(unsafe { core::slice::from_raw_parts(msg.add(poly_off), 64) });
+            poly_off += 64;
+        },
+        8 => {
+            poly.absorb_blocks(unsafe { core::slice::from_raw_parts(msg.add(poly_off), 0) });
+        },
+        _ => {},
+    }
+
+    poly.ensure_stream();
+    // SAFETY: just ensured.
+    let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
+        let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
+        (
+            st.h0,
+            st.h1,
+            st.h2,
+            st.powers.b_r0,
+            st.powers.b_r1,
+            st.powers.b_r2,
+            st.powers.b_s1,
+            st.powers.b_s2,
+        )
+    };
+    let v = rows(state);
+    let mut pptr = msg.add(poly_off);
+    macro_rules! pr {
+        () => {{
+            let (t0, t1, t2) = load8(pptr, pptr.add(64));
+            let (g0, g1, g2) = mul_reduce(h0, h1, h2, r0, r1, r2, s1, s2);
+            h0 = _mm512_add_epi64(g0, t0);
+            h1 = _mm512_add_epi64(g1, t1);
+            h2 = _mm512_add_epi64(g2, t2);
+            pptr = pptr.add(128);
+        }};
+    }
+
+    // Steady fused iterations: 4 MAC windows (512 bytes) per 512 cipher
+    // bytes, 1:1 like the 16-block loop. Each iteration is self-covering:
+    // its loads ([poly_off, poly_off+512)) precede its stores
+    // ([off, off+512)) in program order, and everything the stores touch
+    // below `poly_off` was absorbed by earlier iterations — so the MAC
+    // never reads decrypted bytes. `pptr` stays in lockstep with `poly_off`.
+    while len - off >= 512 && len - poly_off >= 512 {
+        let base = state.words[12];
+        let od0 = ctr_row(state, base, 0);
+        let od1 = ctr_row(state, base, 1);
+        let od2 = ctr_row(state, base, 2);
+        let od3 = ctr_row(state, base, 3);
+        state.advance(8);
+        let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], od0);
+        let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], od1);
+        let (mut a2, mut b2, mut c2, mut d2) = (v[0], v[1], v[2], od2);
+        let (mut a3, mut b3, mut c3, mut d3) = (v[0], v[1], v[2], od3);
+        rounds8_fused!(
+            4, v[0], v[1], v[2], pr, od0, od1, od2, od3, a0, b0, c0, d0, a1, b1, c1, d1, a2, b2,
+            c2, d2, a3, b3, c3, d3
+        );
+        unsafe {
+            store_quad(msg.add(off), a0, b0, c0, d0);
+            store_quad(msg.add(off + 128), a1, b1, c1, d1);
+            store_quad(msg.add(off + 256), a2, b2, c2, d2);
+            store_quad(msg.add(off + 384), a3, b3, c3, d3);
+        }
+        off += 512;
+        poly_off += 512;
+    }
+
+    // Partial tail batch. Open-side ordering invariant: the xor cursor may
+    // only cross a byte AFTER the MAC absorbed it, so this batch's stores
+    // stop at the MAC coverage boundary `poly_off + 128·rounds` (everything
+    // in [off, poly_off) was absorbed by earlier rounds). A mid-batch stop
+    // must land on a block boundary — the engine tail continues the cipher
+    // from `off` with the block counter — so a masked partial store is only
+    // legal when it ends the message; anything else is left to the tail,
+    // which absorbs before it xors.
+    let r = len - off;
+    if r > 0 && r <= 512 {
+        let rounds = ((len - poly_off) / 128).min(4);
+        let stored_end = (poly_off + 128 * rounds).min(len);
+        if stored_end - off >= 384 || rounds > 0 {
+            // Re-sync after the steady loop advanced pptr per iteration.
+            pptr = msg.add(poly_off);
+            let stored = stored_end - off;
+            let k = if stored_end == len {
+                stored % BLOCK
+            } else {
+                0
+            };
+            let nfull = stored / BLOCK;
+            let base = state.words[12];
+            let od0 = ctr_row(state, base, 0);
+            let od1 = ctr_row(state, base, 1);
+            let od2 = ctr_row(state, base, 2);
+            let od3 = ctr_row(state, base, 3);
+            state.advance((nfull + usize::from(k > 0)) as u32);
+            let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], od0);
+            let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], od1);
+            let (mut a2, mut b2, mut c2, mut d2) = (v[0], v[1], v[2], od2);
+            let (mut a3, mut b3, mut c3, mut d3) = (v[0], v[1], v[2], od3);
+            rounds8_fused!(
+                rounds, v[0], v[1], v[2], pr, od0, od1, od2, od3, a0, b0, c0, d0, a1, b1, c1, d1,
+                a2, b2, c2, d2, a3, b3, c3, d3
+            );
+            emit_partial(
+                msg.add(off),
+                nfull,
+                k,
+                a0,
+                b0,
+                c0,
+                d0,
+                a1,
+                b1,
+                c1,
+                d1,
+                a2,
+                b2,
+                c2,
+                d2,
+                a3,
+                b3,
+                c3,
+                d3,
+            );
+            off += nfull * BLOCK + k;
+            poly_off += 128 * rounds;
+        }
+    }
+    // pptr's final increment (inside `pr`) has no later consumer.
+    let _ = pptr;
+
+    // SAFETY: stream ensured above.
+    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
+    st.h0 = h0;
+    st.h1 = h1;
+    st.h2 = h2;
+    (off, poly_off)
+}
+
 /// Single-block (64-byte) kernel in XMM registers.
 #[cfg_attr(not(debug_assertions), inline(always))]
 pub(crate) unsafe fn xor_single(state: &mut State, buf: *mut u8) {
