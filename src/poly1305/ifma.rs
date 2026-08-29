@@ -141,13 +141,19 @@ pub(crate) struct Powers {
 impl Powers {
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn new(r: Limb3) -> Self {
+        // Dependency tree (depth 3, was a 7-deep chain): r8 depends on
+        // r2/r4, the odd powers hang off the tree in parallel — the whole
+        // set costs ~3 chained scalar multiplies of latency instead of 7,
+        // which sat directly on the critical path of every short-message
+        // seal (the stream is created between the cipher kernel and the
+        // MAC rounds).
         let r2 = mul44(r, r);
-        let r3 = mul44(r2, r);
         let r4 = mul44(r2, r2);
+        let r8 = mul44(r4, r4);
+        let r3 = mul44(r2, r);
         let r5 = mul44(r4, r);
         let r6 = mul44(r4, r2);
         let r7 = mul44(r4, r3);
-        let r8 = mul44(r4, r4);
         let lane = [r8, r4, r7, r3, r6, r2, r5, r];
         debug_assert_eq!(core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]), [
             8, 4, 7, 3, 6, 2, 5, 1

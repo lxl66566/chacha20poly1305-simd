@@ -153,6 +153,25 @@ pub(crate) trait Ops {
         let _ = (state, msg, poly);
         (off, poly_off)
     }
+
+    /// Largest message the backend's whole-message fused seal
+    /// ([`Ops::seal_direct`]) handles; 0 = unsupported. When set and the
+    /// message fits, the engine skips its generic prologue entirely: one
+    /// (two, past ~1 KiB) wide kernel derives the Poly1305 one-time key AND
+    /// encrypts, collapsing the separate key kernel + medium batch kernels
+    /// into a single pass — the sub-2 KiB messages otherwise pay two
+    /// serialized kernel launches and a fully serial MAC (no ciphertext
+    /// lag exists to interleave against).
+    const DIRECT_SEAL_MAX: usize = 0;
+
+    /// Whole-message fused seal. Only called when
+    /// `msg.len() <= DIRECT_SEAL_MAX` (and `DIRECT_SEAL_MAX > 0`); must
+    /// produce the tag and advance the counter by the blocks actually
+    /// stored. Default: no-op (never called).
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn seal_direct(state: &mut State, aad: &[u8], msg: &mut [u8], tag_out: &mut [u8; 16]) {
+        let _ = (state, aad, msg, tag_out);
+    }
 }
 
 /// Largest message the IETF 32-bit counter can address (256 GiB - 64 KiB).
@@ -177,7 +196,10 @@ pub(crate) const SMALL_MAX: usize = 3 * BLOCK;
 /// Init the Poly1305 state from the one-time key (scrubbed afterwards when
 /// `zeroize` is on) and absorb the zero-padded AAD.
 #[cfg_attr(not(debug_assertions), inline(always))]
-unsafe fn poly_with_aad<B: crate::poly1305::Backend>(key: &mut [u8; 32], aad: &[u8]) -> Poly<B> {
+pub(crate) unsafe fn poly_with_aad<B: crate::poly1305::Backend>(
+    key: &mut [u8; 32],
+    aad: &[u8],
+) -> Poly<B> {
     let mut poly = Poly::<B>::new(key);
     crate::poly1305::clear_key(key);
     poly.update(aad);
@@ -235,7 +257,7 @@ unsafe fn mac_small_sweep<B: crate::poly1305::Backend>(
 /// Absorb the ciphertext zero-padding and the AAD/message lengths, then
 /// emit the tag (shared by every path's epilogue).
 #[cfg_attr(not(debug_assertions), inline(always))]
-unsafe fn finish_tag<B: crate::poly1305::Backend>(
+pub(crate) unsafe fn finish_tag<B: crate::poly1305::Backend>(
     poly: &mut Poly<B>,
     aad_len: usize,
     ct_len: usize,
@@ -335,6 +357,16 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                 crate::chacha::xor_bytes(msg, &ks[..msg.len()]);
             }
             poly.finalize_into(tag_out);
+            return;
+        }
+
+        // ── Whole-message direct seal ──
+        // Backends with a dedicated kernel family (16-block batches from
+        // counter 0, key extraction included) handle the entire message in
+        // one or two passes; the generic prologue's separate 2-block key
+        // kernel + medium batches would serialize instead.
+        if SEAL && O::DIRECT_SEAL_MAX > 0 && msg.len() <= O::DIRECT_SEAL_MAX {
+            O::seal_direct(state, aad, msg, tag_out);
             return;
         }
 

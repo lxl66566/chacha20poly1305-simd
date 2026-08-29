@@ -1404,6 +1404,11 @@ pub(crate) unsafe fn seal_medium(
         },
         _ => {},
     }
+    // Create the streaming state (r^8 powers) up front: the key-power
+    // computation is independent of the cipher, so out-of-order execution
+    // hides it under the kernel rounds below instead of sitting serially
+    // between the cipher and the first MAC fold.
+    poly.ensure_stream();
 
     let r = len - off;
     if r == 0 {
@@ -1412,13 +1417,11 @@ pub(crate) unsafe fn seal_medium(
     let nfull = r / BLOCK;
     let k = r % BLOCK;
     let rounds = ((off - poly_off) / 128).min((len - poly_off) / 128).min(8);
-    // Below ~6 stored blocks the cascade tail beats an 8-block computation
+    // Below ~3 stored blocks the cascade tail beats an 8-block computation
     // with most of its results discarded.
-    if r < 384 && rounds == 0 {
+    if r < 192 && rounds == 0 {
         return (off, poly_off);
     }
-
-    poly.ensure_stream();
     // SAFETY: just ensured.
     let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
         let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
@@ -1529,8 +1532,10 @@ pub(crate) unsafe fn open_medium(
         },
         _ => {},
     }
-
+    // See seal_medium: create the streaming state up front so the r^8
+    // powers overlap the cipher rounds.
     poly.ensure_stream();
+
     // SAFETY: just ensured.
     let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
         let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
@@ -1659,6 +1664,282 @@ pub(crate) unsafe fn open_medium(
     st.h1 = h1;
     st.h2 = h2;
     (off, poly_off)
+}
+
+// ── Whole-message direct seal (16-block zmm batches from counter 0) ──
+//
+// The engine's generic prologue pays a serialized 2-block key kernel
+// (gen_key_xor2) before any bulk kernel; on sub-2 KiB messages the medium
+// path above adds another quad batch, and with no ciphertext lag the MAC
+// runs fully serial after the cipher. Here ONE word-major zmm kernel
+// derives the Poly1305 key from block 0 AND encrypts blocks 1..=15 (masked
+// partial store for the final block); messages past 960 bytes get a second
+// zmm batch with up to 7 IFMA MAC rounds woven between the double rounds,
+// reading only kernel-1 ciphertext (< 960) — no store→load hazards.
+
+/// emit16 variant for kernel 1: block 0 goes (raw keystream) to `key64`,
+/// blocks `1..=n1` XOR-store at `(b-1)*BLOCK`, plus a `k1`-byte masked
+/// partial at block `n1+1` — runtime `n1`/`k1`, so any length ≤ 15 blocks
+/// is covered by the single kernel.
+macro_rules! emit16k {
+    (
+        $buf:expr,
+        $key64:expr,
+        $bc:expr,
+        $ctr:expr,
+        $n1:expr,
+        $k1:expr,
+        $x0:ident,
+        $x1:ident,
+        $x2:ident,
+        $x3:ident,
+        $x4:ident,
+        $x5:ident,
+        $x6:ident,
+        $x7:ident,
+        $x8:ident,
+        $x9:ident,
+        $x10:ident,
+        $x11:ident,
+        $x12:ident,
+        $x13:ident,
+        $x14:ident,
+        $x15:ident
+    ) => {{
+        $x0 = _mm512_add_epi32($x0, ($bc)(0));
+        $x1 = _mm512_add_epi32($x1, ($bc)(1));
+        $x2 = _mm512_add_epi32($x2, ($bc)(2));
+        $x3 = _mm512_add_epi32($x3, ($bc)(3));
+        $x4 = _mm512_add_epi32($x4, ($bc)(4));
+        $x5 = _mm512_add_epi32($x5, ($bc)(5));
+        $x6 = _mm512_add_epi32($x6, ($bc)(6));
+        $x7 = _mm512_add_epi32($x7, ($bc)(7));
+        $x8 = _mm512_add_epi32($x8, ($bc)(8));
+        $x9 = _mm512_add_epi32($x9, ($bc)(9));
+        $x10 = _mm512_add_epi32($x10, ($bc)(10));
+        $x11 = _mm512_add_epi32($x11, ($bc)(11));
+        $x12 = _mm512_add_epi32($x12, $ctr);
+        $x13 = _mm512_add_epi32($x13, ($bc)(13));
+        $x14 = _mm512_add_epi32($x14, ($bc)(14));
+        $x15 = _mm512_add_epi32($x15, ($bc)(15));
+
+        tr4z!($x0, $x1, $x2, $x3);
+        tr4z!($x4, $x5, $x6, $x7);
+        tr4z!($x8, $x9, $x10, $x11);
+        tr4z!($x12, $x13, $x14, $x15);
+
+        let buf = $buf;
+        let key64 = $key64;
+        let n1 = $n1;
+        let k1 = $k1;
+        let idx_b = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23);
+        macro_rules! emitk {
+            ($b: literal,$l: literal,$g0: ident,$g1: ident,$g2: ident,$g3: ident) => {{
+                const L: i32 = 4 * $l;
+                let idx_a = _mm512_setr_epi32(
+                    L,
+                    L + 1,
+                    L + 2,
+                    L + 3,
+                    16 + L,
+                    16 + L + 1,
+                    16 + L + 2,
+                    16 + L + 3,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                );
+                let lo = _mm512_permutex2var_epi32($g0, idx_a, $g1);
+                let hi = _mm512_permutex2var_epi32($g2, idx_a, $g3);
+                let block = _mm512_permutex2var_epi32(lo, idx_b, hi);
+                if $b == 0 {
+                    _mm512_storeu_si512(key64.as_mut_ptr().cast(), block);
+                } else {
+                    let bi = $b - 1;
+                    let p = buf.add(bi * BLOCK);
+                    if bi < n1 {
+                        _mm512_storeu_si512(
+                            p.cast(),
+                            _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block),
+                        );
+                    } else if bi == n1 && k1 > 0 {
+                        let m = ((1u64 << k1) - 1) as __mmask64;
+                        _mm512_mask_storeu_epi8(
+                            p.cast(),
+                            m,
+                            _mm512_xor_si512(_mm512_loadu_si512(p.cast()), block),
+                        );
+                    }
+                }
+            }};
+        }
+        emitk!(0, 0, $x0, $x4, $x8, $x12);
+        emitk!(1, 0, $x1, $x5, $x9, $x13);
+        emitk!(2, 0, $x2, $x6, $x10, $x14);
+        emitk!(3, 0, $x3, $x7, $x11, $x15);
+        emitk!(4, 1, $x0, $x4, $x8, $x12);
+        emitk!(5, 1, $x1, $x5, $x9, $x13);
+        emitk!(6, 1, $x2, $x6, $x10, $x14);
+        emitk!(7, 1, $x3, $x7, $x11, $x15);
+        emitk!(8, 2, $x0, $x4, $x8, $x12);
+        emitk!(9, 2, $x1, $x5, $x9, $x13);
+        emitk!(10, 2, $x2, $x6, $x10, $x14);
+        emitk!(11, 2, $x3, $x7, $x11, $x15);
+        emitk!(12, 3, $x0, $x4, $x8, $x12);
+        emitk!(13, 3, $x1, $x5, $x9, $x13);
+        emitk!(14, 3, $x2, $x6, $x10, $x14);
+        emitk!(15, 3, $x3, $x7, $x11, $x15);
+    }};
+}
+
+/// Kernel 1 of [`seal_direct`]: 16 blocks from the initial counter; block
+/// 0 → `key64` (raw keystream), blocks `1..=n1` (+`k1` partial) → message.
+/// Advances the counter by the blocks actually stored.
+#[target_feature(enable = "avx512f")]
+#[inline(never)]
+unsafe fn seal_direct_k1(
+    state: &mut State,
+    msg: *mut u8,
+    key64: &mut [u8; 64],
+    n1: usize,
+    k1: usize,
+) {
+    let w = state.words;
+    let bcast = |i: usize| _mm512_set1_epi32(w[i] as i32);
+    let ctr = _mm512_add_epi32(
+        bcast(12),
+        _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+    );
+    let (mut x0, mut x1, mut x2, mut x3) = (bcast(0), bcast(1), bcast(2), bcast(3));
+    let (mut x4, mut x5, mut x6, mut x7) = (bcast(4), bcast(5), bcast(6), bcast(7));
+    let (mut x8, mut x9, mut x10, mut x11) = (bcast(8), bcast(9), bcast(10), bcast(11));
+    let (mut x12, mut x13, mut x14, mut x15) = (ctr, bcast(13), bcast(14), bcast(15));
+    state.words[12] = 1 + n1 as u32 + u32::from(k1 > 0);
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    dr16!(
+        x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+    );
+    emit16k!(
+        msg, key64, bcast, ctr, n1, k1, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13,
+        x14, x15
+    );
+}
+
+/// Whole-message fused seal for the IFMA tier (requires AVX-512F+VL+IFMA).
+///
+/// Two kernel shapes cover the band (measured on Zen 4, where 512-bit ops
+/// are double-pumped and quads beat zmm per block at small counts):
+///
+/// - ≤ 448 B: one quad `rounds4` batch from counter 0 — block 0 yields the key, blocks 1..7 (+
+///   masked partial) the message.
+/// - ≤ 960 B: one word-major zmm batch (16 blocks) via [`seal_direct_k1`] — the wider batch
+///   amortizes its shuffle-free rounds from ~9 blocks on.
+///
+/// Either way the whole cipher is ONE pass (the generic prologue's separate
+/// 2-block key kernel disappears) and the MAC — with no ciphertext lag to
+/// interleave against on this band — folds through the wide absorb path
+/// right after the kernel.
+///
+/// Engine contract: `SMALL_MAX < len <= 15·BLOCK` (192 < len ≤ 960).
+#[target_feature(enable = "avx512f,avx512vl,avx512ifma")]
+#[inline(never)]
+pub(crate) unsafe fn seal_direct(
+    state: &mut State,
+    aad: &[u8],
+    msg: *mut u8,
+    len: usize,
+    tag_out: &mut [u8; 16],
+) {
+    debug_assert!(len > crate::aead::SMALL_MAX);
+    debug_assert!(len <= 15 * BLOCK);
+    let nfull = len / BLOCK; // 4..=15 whole message blocks
+    let k = len % BLOCK;
+
+    let mut key32 = [0u8; 32];
+    if len <= 7 * BLOCK {
+        // Quad batch: blocks 0..8 (key + up to 7 message blocks).
+        let v = rows(state);
+        let base = state.words[12];
+        let ctrs = [
+            ctr_row(state, base, 0),
+            ctr_row(state, base, 1),
+            ctr_row(state, base, 2),
+            ctr_row(state, base, 3),
+        ];
+        state.words[12] = 1 + nfull as u32 + u32::from(k > 0);
+        let vs = rounds4(&v, &ctrs);
+        let quads: [(__m256i, __m256i, __m256i, __m256i); 4] = [
+            (vs[0][0], vs[0][1], vs[0][2], vs[0][3]),
+            (vs[1][0], vs[1][1], vs[1][2], vs[1][3]),
+            (vs[2][0], vs[2][1], vs[2][2], vs[2][3]),
+            (vs[3][0], vs[3][1], vs[3][2], vs[3][3]),
+        ];
+        // Block 0's first 32 bytes = the one-time key (quad 0, lane 0).
+        unsafe {
+            _mm256_storeu_si256(
+                key32.as_mut_ptr().cast(),
+                _mm256_permute2f128_si256::<0x20>(quads[0].0, quads[0].1),
+            );
+        }
+        // Message block i (buffer offset i·64) = state block i+1
+        // = quad (i+1)/2, lane (i+1)%2.
+        for i in 0..nfull {
+            let b = i + 1;
+            let (a, bb, c, d) = quads[b / 2];
+            unsafe { store_blk(msg, i, a, bb, c, d, b % 2, BLOCK) };
+        }
+        if k > 0 {
+            let b = nfull + 1;
+            let (a, bb, c, d) = quads[b / 2];
+            unsafe { store_blk(msg, nfull, a, bb, c, d, b % 2, k) };
+        }
+    } else {
+        let mut key64 = [0u8; 64];
+        unsafe { seal_direct_k1(state, msg, &mut key64, nfull, k) };
+        key32.copy_from_slice(&key64[..32]);
+    }
+
+    let mut poly = crate::aead::poly_with_aad::<crate::poly1305::ifma::IfmaPoly>(&mut key32, aad);
+
+    // MAC alignment window (the whole buffer is ciphertext by now).
+    let m = poly.pending_blocks();
+    let s = (4 - m % 4) % 4 * 16;
+    if s > 0 {
+        unsafe { poly.update(core::slice::from_raw_parts(msg, s)) };
+    }
+    unsafe { poly.update_tail(core::slice::from_raw_parts(msg.add(s), len - s)) };
+    unsafe { crate::aead::finish_tag(&mut poly, aad.len(), len, tag_out) };
 }
 
 /// Single-block (64-byte) kernel in XMM registers.

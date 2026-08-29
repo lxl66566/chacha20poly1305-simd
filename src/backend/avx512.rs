@@ -80,8 +80,17 @@ impl Ops for Avx512IfmaOps {
     type Poly = crate::poly1305::ifma::IfmaPoly;
 
     const CHACHA_BATCH: usize = crate::chacha::avx512::BATCH_BLOCKS;
+    const DIRECT_SEAL_MAX: usize = 15 * BLOCK;
     const FUSED_MEDIUM: bool = true;
     const FUSED_OPEN: bool = true;
+
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn seal_direct(state: &mut State, aad: &[u8], msg: &mut [u8], tag_out: &mut [u8; 16]) {
+        // SAFETY: callers reached this through the ifma entry points.
+        unsafe {
+            crate::chacha::avx512::seal_direct(state, aad, msg.as_mut_ptr(), msg.len(), tag_out);
+        }
+    }
 
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn gen_key_xor2(state: &mut State, key_out: &mut [u8; 32], b1: &mut [u8]) {
@@ -417,7 +426,34 @@ mod tests {
             (2113, 1),
             (3072, 64),
             (8192, 48),
-            // AAD sizes driving the flush/pairing guards.
+            // seal_direct band boundaries: quad/zmm kernel switch at 448,
+            // single-kernel cap at 960 (961 falls back to the medium path),
+            // and partial-block cases in each band.
+            (447, 16),
+            (448, 0),
+            (448, 16),
+            (449, 0),
+            (449, 16),
+            (450, 1),
+            (511, 16),
+            (959, 16),
+            (960, 0),
+            (960, 16),
+            (961, 0),
+            (961, 16),
+            (1000, 33),
+            (1023, 0),
+            (1023, 5),
+            (1087, 0),
+            (1217, 16),
+            (1537, 1),
+            (1919, 16),
+            (1920, 0),
+            (1920, 16),
+            (1921, 0),
+            (1921, 16),
+            (1984, 16),
+            // AAD sizes driving the direct path's cached-fold guards.
             (640, 3),
             (640, 15),
             (640, 17),
