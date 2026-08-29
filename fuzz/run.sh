@@ -12,9 +12,9 @@
 #
 # CPU usage is controlled by the caller: give each backend a core list
 # (taskset) and, optionally, the fork-job count. Examples:
-#   fuzz/run.sh                       # 1800s, 0-2:3-5:6-8:9-11
-#   fuzz/run.sh 300 "0-1:2-3:4-5"     # fewer cores per backend
-#   FUZZ_JOBS=2 fuzz/run.sh 300       # override fork jobs
+#   fuzz/run.sh                          # 1800s, 0-2:3-5:6-8:9-11
+#   fuzz/run.sh 300 "0-2:3-5:6-8:9-11"   # fewer cores per backend
+#   FUZZ_JOBS=2 fuzz/run.sh 300          # override fork jobs
 #
 # Usage: fuzz/run.sh [seconds-per-backend] [cpu-spec]
 #   cpu-spec: core list for each backend, colon-separated (soft:sse2:avx2:avx512).
@@ -32,74 +32,78 @@ trap 'rm -rf "$TMP"' EXIT
 # Per-backend RUSTFLAGS: force our backend, and give SIMD tiers the matching
 # target features build.rs demands (matches the production build contract).
 flags_for() {
-    case $1 in
-        soft)   printf '%s' '--cfg chacha20poly1305_backend="soft"' ;;
-        sse2)   printf '%s' '--cfg chacha20poly1305_backend="sse2"' ;;
-        avx2)   printf '%s' '--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' ;;
-        avx512) printf '%s' '--cfg chacha20poly1305_backend="avx512" -Ctarget-feature=+avx2,+avx512f,+avx512vl' ;;
-        *) exit 1 ;;
-    esac
+	case $1 in
+	soft) printf '%s' '--cfg chacha20poly1305_backend="soft"' ;;
+	sse2) printf '%s' '--cfg chacha20poly1305_backend="sse2"' ;;
+	avx2) printf '%s' '--cfg chacha20poly1305_backend="avx2" -Ctarget-feature=+avx2' ;;
+	avx512) printf '%s' '--cfg chacha20poly1305_backend="avx512" -Ctarget-feature=+avx2,+avx512f,+avx512vl' ;;
+	*) exit 1 ;;
+	esac
 }
 
 BACKENDS=(soft sse2 avx2 avx512)
-IFS=: read -ra CORES <<< "$SPEC"
+IFS=: read -ra CORES <<<"$SPEC"
 if [ "${#CORES[@]}" -ne 4 ]; then
-    echo "cpu-spec must have 4 parts (soft:sse2:avx2:avx512), got: $SPEC" >&2
-    exit 1
+	echo "cpu-spec must have 4 parts (soft:sse2:avx2:avx512), got: $SPEC" >&2
+	exit 1
 fi
 
 count_cores() {
-    local n=0 part lo hi
-    IFS=, read -ra parts <<< "$1"
-    for part in "${parts[@]}"; do
-        if [[ "$part" == *-* ]]; then
-            lo=${part%-*}; hi=${part#*-}
-            n=$((n + hi - lo + 1))
-        else
-            n=$((n + 1))
-        fi
-    done
-    echo "$n"
+	local n=0 part lo hi
+	IFS=, read -ra parts <<<"$1"
+	for part in "${parts[@]}"; do
+		if [[ "$part" == *-* ]]; then
+			lo=${part%-*}
+			hi=${part#*-}
+			n=$((n + hi - lo + 1))
+		else
+			n=$((n + 1))
+		fi
+	done
+	echo "$n"
 }
 
 PIDS=()
 for i in "${!BACKENDS[@]}"; do
-    be=${BACKENDS[$i]}
-    cores=${CORES[$i]}
-    cp -r "corpus/differential" "$TMP/corpus-$be"
-    mkdir -p "$TMP/art-$be" "$TMP/target-$be"
-    jobs=${FUZZ_JOBS:-}
-    if [ -z "$jobs" ]; then
-        c=$(count_cores "$cores")
-        jobs=$((c < 4 ? c : 4))
-    fi
-    RUSTFLAGS="$(flags_for "$be")" CARGO_TARGET_DIR="$TMP/target-$be" \
-        taskset -c "$cores" \
-        cargo fuzz run -j "$jobs" differential "$TMP/corpus-$be" -- \
-        -max_total_time="$TIME" -max_len="$MAXLEN" -artifact_prefix="$TMP/art-$be/" \
-        > "$TMP/fuzz-$be.log" 2>&1 &
-    PIDS+=($!)
-    echo "[$be] pid $! cores $cores jobs $jobs"
+	be=${BACKENDS[$i]}
+	cores=${CORES[$i]}
+	cp -r "corpus/differential" "$TMP/corpus-$be"
+	mkdir -p "$TMP/art-$be" "$TMP/target-$be"
+	jobs=${FUZZ_JOBS:-}
+	if [ -z "$jobs" ]; then
+		c=$(count_cores "$cores")
+		jobs=$((c < 4 ? c : 4))
+	fi
+	RUSTFLAGS="$(flags_for "$be")" CARGO_TARGET_DIR="$TMP/target-$be" \
+		taskset -c "$cores" \
+		cargo fuzz run -j "$jobs" differential "$TMP/corpus-$be" -- \
+		-max_total_time="$TIME" -max_len="$MAXLEN" -artifact_prefix="$TMP/art-$be/" \
+		>"$TMP/fuzz-$be.log" 2>&1 &
+	PIDS+=($!)
+	echo "[$be] pid $! cores $cores jobs $jobs"
 done
 
 FAIL=0
 for i in "${!BACKENDS[@]}"; do
-    be=${BACKENDS[$i]}
-    if wait "${PIDS[$i]}"; then
-        echo "[$be] finished: $(tail -1 "$TMP/fuzz-$be.log")"
-    else
-        echo "[$be] FAILED:"; tail -30 "$TMP/fuzz-$be.log"; FAIL=1
-    fi
-    if ls "$TMP/art-$be"/* >/dev/null 2>&1; then
-        echo "[$be] artifacts:"; cp -v "$TMP/art-$be"/* artifacts/differential/
-    fi
+	be=${BACKENDS[$i]}
+	if wait "${PIDS[$i]}"; then
+		echo "[$be] finished: $(tail -1 "$TMP/fuzz-$be.log")"
+	else
+		echo "[$be] FAILED:"
+		tail -30 "$TMP/fuzz-$be.log"
+		FAIL=1
+	fi
+	if ls "$TMP/art-$be"/* >/dev/null 2>&1; then
+		echo "[$be] artifacts:"
+		cp -v "$TMP/art-$be"/* artifacts/differential/
+	fi
 done
 # Preserve the per-backend libFuzzer logs so executed-run totals stay
 # auditable after the TMP cleanup below (the final `#N` fork-mode progress
 # line carries the cumulative execution count).
 mkdir -p logs
 for i in "${!BACKENDS[@]}"; do
-    be=${BACKENDS[$i]}
-    cp "$TMP/fuzz-$be.log" "logs/fuzz-$be-$(date +%Y%m%d-%H%M%S).log"
+	be=${BACKENDS[$i]}
+	cp "$TMP/fuzz-$be.log" "logs/fuzz-$be-$(date +%Y%m%d-%H%M%S).log"
 done
 exit $FAIL

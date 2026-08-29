@@ -1,6 +1,6 @@
 [package]
 name         = "chacha20poly1305-simd"
-version      = "0.3.0"
+version      = "0.3.1"
 edition      = "2024"
 rust-version = "1.89"
 description  = "Fast (X)ChaCha20-Poly1305 AEAD with hand-written AVX-512/AVX2/NEON kernels in pure Rust"
