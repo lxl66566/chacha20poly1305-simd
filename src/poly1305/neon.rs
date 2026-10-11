@@ -282,16 +282,16 @@ impl NeonPoly {
 
 impl Backend for NeonPoly {
     #[cfg_attr(not(debug_assertions), inline(always))]
-    unsafe fn init(key: &[u8; 32]) -> Self {
+    unsafe fn init_at(out: *mut Self, key: &[u8; 32]) {
         let (r, k) = parse_key(key);
         let s = [r[1] * 5, r[2] * 5, r[3] * 5, r[4] * 5];
-        Self {
-            k,
-            r,
-            s,
-            lanes: None,
-            cached: [0; 128],
-            num_cached: 0,
+        unsafe {
+            core::ptr::addr_of_mut!((*out).k).write(k);
+            core::ptr::addr_of_mut!((*out).r).write(r);
+            core::ptr::addr_of_mut!((*out).s).write(s);
+            core::ptr::addr_of_mut!((*out).lanes).write(None);
+            core::ptr::addr_of_mut!((*out).cached).write([0; 128]);
+            core::ptr::addr_of_mut!((*out).num_cached).write(0);
         }
     }
 

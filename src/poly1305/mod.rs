@@ -25,8 +25,16 @@ pub(crate) mod neon;
 
 /// Primitive operations each Poly1305 backend must provide.
 pub(crate) trait Backend {
-    /// Init from a one-time key: clamped `r`, addition key `s`.
-    unsafe fn init(key: &[u8; 32]) -> Self
+    /// Initialize the backend state at `out` from a one-time key: clamped
+    /// `r`, addition key `s`. In-place contract (vs a `Self` return): the
+    /// wide SIMD states are 600+ byte aggregates that LLVM will not SROA,
+    /// so a by-value return lowers to a whole-struct libc memcpy per seal.
+    ///
+    /// # Safety
+    ///
+    /// `out` must be valid for writes and the caller must guarantee the
+    /// CPU features the backend requires (runtime dispatch does).
+    unsafe fn init_at(out: *mut Self, key: &[u8; 32])
     where
         Self: Sized;
     /// Absorb one full block with the 2^128 high bit set.
@@ -70,16 +78,37 @@ pub(crate) struct Poly<B: Backend> {
 }
 
 impl<B: Backend> Poly<B> {
+    /// Construct at `slot` (see [`Backend::init_at`] for why in-place).
+    ///
+    /// # Safety
+    ///
+    /// `slot` must be valid for writes; the caller must guarantee the
+    /// backend's CPU features.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub(crate) unsafe fn new_at(slot: *mut Poly<B>, key: &[u8; 32]) {
+        unsafe {
+            B::init_at(core::ptr::addr_of_mut!((*slot).inner), key);
+            core::ptr::addr_of_mut!((*slot).pending).write([0; 16]);
+            core::ptr::addr_of_mut!((*slot).have).write(0);
+            #[cfg(test)]
+            core::ptr::addr_of_mut!((*slot).dbg_absorbed).write(0);
+            #[cfg(test)]
+            core::ptr::addr_of_mut!((*slot).dbg_digest).write(0);
+        }
+    }
+
+    /// By-value convenience wrapper (tests, backends with small states).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::new_at`].
+    #[cfg(test)]
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn new(key: &[u8; 32]) -> Self {
-        Self {
-            inner: B::init(key),
-            pending: [0; 16],
-            have: 0,
-            #[cfg(test)]
-            dbg_absorbed: 0,
-            #[cfg(test)]
-            dbg_digest: 0,
+        let mut slot = core::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            Self::new_at(slot.as_mut_ptr(), key);
+            slot.assume_init()
         }
     }
 
@@ -116,9 +145,15 @@ impl<B: Backend> Poly<B> {
             }
             self.inner.absorb_block(block);
         }
-        self.pending = [0; 16];
-        self.pending[..rem.len()].copy_from_slice(rem);
-        self.have = rem.len();
+        // BUGFIX: an unguarded empty copy lowers to a libc memcpy(0) call —
+        // measured as ~5 calls (≈125 cycles) per small-message seal.
+        if rem.is_empty() {
+            self.have = 0;
+        } else {
+            self.pending = [0; 16];
+            self.pending[..rem.len()].copy_from_slice(rem);
+            self.have = rem.len();
+        }
     }
 
     /// Hot-path absorb of exactly 4 blocks at a 64-byte aligned stream

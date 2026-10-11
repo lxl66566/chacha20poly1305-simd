@@ -160,9 +160,14 @@ pub(crate) struct SoftPoly {
 }
 
 impl Backend for SoftPoly {
-    unsafe fn init(key: &[u8; 32]) -> Self {
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    unsafe fn init_at(out: *mut Self, key: &[u8; 32]) {
         let (r, pad) = parse_key(key);
-        Self { r, h: [0; 5], pad }
+        unsafe {
+            core::ptr::addr_of_mut!((*out).r).write(r);
+            core::ptr::addr_of_mut!((*out).h).write([0; 5]);
+            core::ptr::addr_of_mut!((*out).pad).write(pad);
+        }
     }
 
     #[cfg_attr(not(debug_assertions), inline(always))]

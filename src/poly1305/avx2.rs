@@ -46,16 +46,16 @@ struct Initialized {
 
 impl Backend for Avx2Poly {
     #[cfg_attr(not(debug_assertions), inline(always))]
-    unsafe fn init(key: &[u8; 32]) -> Self {
+    unsafe fn init_at(out: *mut Self, key: &[u8; 32]) {
         let (k, r1) = prepare_keys(key);
         let r2 = PrecomputedMultiplier::from((Aligned130(r1.a) * r1).reduce());
-        Self {
-            k,
-            r1,
-            r2,
-            initialized: None,
-            cached: [0; 128],
-            num_cached: 0,
+        unsafe {
+            core::ptr::addr_of_mut!((*out).k).write(k);
+            core::ptr::addr_of_mut!((*out).r1).write(r1);
+            core::ptr::addr_of_mut!((*out).r2).write(r2);
+            core::ptr::addr_of_mut!((*out).initialized).write(None);
+            core::ptr::addr_of_mut!((*out).cached).write([0; 128]);
+            core::ptr::addr_of_mut!((*out).num_cached).write(0);
         }
     }
 
