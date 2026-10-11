@@ -164,6 +164,50 @@ unsafe fn rounds1(v: &[__m256i; 3], ctr: __m256i) -> [__m256i; 4] {
     ]
 }
 
+/// Three-quad (6-block) variant of [`rounds4`] — the 193..=320-byte
+/// `seal_direct` band needs 5..=6 blocks (key + message + masked partial);
+/// jumping straight to the 8-block ladder wastes ~2 blocks of rounds there.
+#[cfg_attr(not(debug_assertions), inline(always))]
+unsafe fn rounds3(v: &[__m256i; 3], ctrs: &[__m256i; 3]) -> [[__m256i; 4]; 3] {
+    let (mut a0, mut b0, mut c0, mut d0) = (v[0], v[1], v[2], ctrs[0]);
+    let (mut a1, mut b1, mut c1, mut d1) = (v[0], v[1], v[2], ctrs[1]);
+    let (mut a2, mut b2, mut c2, mut d2) = (v[0], v[1], v[2], ctrs[2]);
+    for _ in 0..10 {
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        qr!(a2, b2, c2, d2);
+        to_cols!(a0, b0, c0, d0);
+        to_cols!(a1, b1, c1, d1);
+        to_cols!(a2, b2, c2, d2);
+        qr!(a0, b0, c0, d0);
+        qr!(a1, b1, c1, d1);
+        qr!(a2, b2, c2, d2);
+        to_rows!(a0, b0, c0, d0);
+        to_rows!(a1, b1, c1, d1);
+        to_rows!(a2, b2, c2, d2);
+    }
+    [
+        [
+            _mm256_add_epi32(a0, v[0]),
+            _mm256_add_epi32(b0, v[1]),
+            _mm256_add_epi32(c0, v[2]),
+            _mm256_add_epi32(d0, ctrs[0]),
+        ],
+        [
+            _mm256_add_epi32(a1, v[0]),
+            _mm256_add_epi32(b1, v[1]),
+            _mm256_add_epi32(c1, v[2]),
+            _mm256_add_epi32(d1, ctrs[1]),
+        ],
+        [
+            _mm256_add_epi32(a2, v[0]),
+            _mm256_add_epi32(b2, v[1]),
+            _mm256_add_epi32(c2, v[2]),
+            _mm256_add_epi32(d2, ctrs[2]),
+        ],
+    ]
+}
+
 /// Two-quad (4-block) variant of [`rounds4`] — the OpenSSL 4x ladder tier
 /// for 256..511-byte tails.
 #[cfg_attr(not(debug_assertions), inline(always))]
@@ -816,15 +860,14 @@ pub(crate) unsafe fn xor_batch16_seal_bulk(
     use crate::poly1305::ifma::{load8, mul_reduce};
 
     poly.ensure_stream();
-    // SAFETY: just ensured.
-    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
-    let (mut h0, mut h1, mut h2) = (st.h0, st.h1, st.h2);
+    let (mut h0, mut h1, mut h2) = (poly.h0, poly.h1, poly.h2);
+    let (ra, rb, rc) = poly.r8_limbs();
     let (r0, r1, r2, s1, s2) = (
-        st.powers.b_r0,
-        st.powers.b_r1,
-        st.powers.b_r2,
-        st.powers.b_s1,
-        st.powers.b_s2,
+        _mm512_set1_epi64(ra as i64),
+        _mm512_set1_epi64(rb as i64),
+        _mm512_set1_epi64(rc as i64),
+        _mm512_set1_epi64((20 * rb) as i64),
+        _mm512_set1_epi64((20 * rc) as i64),
     );
 
     // Hoisted broadcast state: only the counter row changes per iteration.
@@ -943,9 +986,9 @@ pub(crate) unsafe fn xor_batch16_seal_bulk(
     }
 
     state.advance(16u32.wrapping_mul(iters));
-    st.h0 = h0;
-    st.h1 = h1;
-    st.h2 = h2;
+    poly.h0 = h0;
+    poly.h1 = h1;
+    poly.h2 = h2;
     (off, poly_off)
 }
 
@@ -968,15 +1011,14 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
     use crate::poly1305::ifma::{load8, mul_reduce};
 
     poly.ensure_stream();
-    // SAFETY: just ensured.
-    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
-    let (mut h0, mut h1, mut h2) = (st.h0, st.h1, st.h2);
+    let (mut h0, mut h1, mut h2) = (poly.h0, poly.h1, poly.h2);
+    let (ra, rb, rc) = poly.r8_limbs();
     let (r0, r1, r2, s1, s2) = (
-        st.powers.b_r0,
-        st.powers.b_r1,
-        st.powers.b_r2,
-        st.powers.b_s1,
-        st.powers.b_s2,
+        _mm512_set1_epi64(ra as i64),
+        _mm512_set1_epi64(rb as i64),
+        _mm512_set1_epi64(rc as i64),
+        _mm512_set1_epi64((20 * rb) as i64),
+        _mm512_set1_epi64((20 * rc) as i64),
     );
 
     let w = state.words;
@@ -1092,9 +1134,9 @@ pub(crate) unsafe fn xor_batch16_open_bulk(
     }
 
     state.advance(16u32.wrapping_mul(iters));
-    st.h0 = h0;
-    st.h1 = h1;
-    st.h2 = h2;
+    poly.h0 = h0;
+    poly.h1 = h1;
+    poly.h2 = h2;
     (off, poly_off)
 }
 
@@ -1422,18 +1464,18 @@ pub(crate) unsafe fn seal_medium(
     if r < 192 && rounds == 0 {
         return (off, poly_off);
     }
-    // SAFETY: just ensured.
+    // SAFETY: stream ensured above.
     let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
-        let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
+        let (ra, rb, rc) = poly.r8_limbs();
         (
-            st.h0,
-            st.h1,
-            st.h2,
-            st.powers.b_r0,
-            st.powers.b_r1,
-            st.powers.b_r2,
-            st.powers.b_s1,
-            st.powers.b_s2,
+            poly.h0,
+            poly.h1,
+            poly.h2,
+            _mm512_set1_epi64(ra as i64),
+            _mm512_set1_epi64(rb as i64),
+            _mm512_set1_epi64(rc as i64),
+            _mm512_set1_epi64((20 * rb) as i64),
+            _mm512_set1_epi64((20 * rc) as i64),
         )
     };
     let v = rows(state);
@@ -1487,11 +1529,9 @@ pub(crate) unsafe fn seal_medium(
     );
     off = len;
     poly_off += 128 * rounds;
-    // SAFETY: stream ensured above.
-    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
-    st.h0 = h0;
-    st.h1 = h1;
-    st.h2 = h2;
+    poly.h0 = h0;
+    poly.h1 = h1;
+    poly.h2 = h2;
     (off, poly_off)
 }
 
@@ -1536,18 +1576,18 @@ pub(crate) unsafe fn open_medium(
     // powers overlap the cipher rounds.
     poly.ensure_stream();
 
-    // SAFETY: just ensured.
+    // SAFETY: stream ensured above.
     let (mut h0, mut h1, mut h2, r0, r1, r2, s1, s2) = {
-        let st = unsafe { poly.stream.as_ref().unwrap_unchecked() };
+        let (ra, rb, rc) = poly.r8_limbs();
         (
-            st.h0,
-            st.h1,
-            st.h2,
-            st.powers.b_r0,
-            st.powers.b_r1,
-            st.powers.b_r2,
-            st.powers.b_s1,
-            st.powers.b_s2,
+            poly.h0,
+            poly.h1,
+            poly.h2,
+            _mm512_set1_epi64(ra as i64),
+            _mm512_set1_epi64(rb as i64),
+            _mm512_set1_epi64(rc as i64),
+            _mm512_set1_epi64((20 * rb) as i64),
+            _mm512_set1_epi64((20 * rc) as i64),
         )
     };
     let v = rows(state);
@@ -1658,11 +1698,9 @@ pub(crate) unsafe fn open_medium(
     // pptr's final increment (inside `pr`) has no later consumer.
     let _ = pptr;
 
-    // SAFETY: stream ensured above.
-    let st = unsafe { poly.stream.as_mut().unwrap_unchecked() };
-    st.h0 = h0;
-    st.h1 = h1;
-    st.h2 = h2;
+    poly.h0 = h0;
+    poly.h1 = h1;
+    poly.h2 = h2;
     (off, poly_off)
 }
 
@@ -1861,8 +1899,8 @@ unsafe fn seal_direct_k1(
 /// Two kernel shapes cover the band (measured on Zen 4, where 512-bit ops
 /// are double-pumped and quads beat zmm per block at small counts):
 ///
-/// - ≤ 448 B: one quad `rounds4` batch from counter 0 — block 0 yields the key, blocks 1..7 (+
-///   masked partial) the message.
+/// - ≤ 448 B: one quad batch from counter 0 — `rounds3` (6 blocks) for ≤ 320 B, `rounds4` (8
+///   blocks) above — block 0 yields the key, blocks 1..N (+ masked partial) the message.
 /// - ≤ 960 B: one word-major zmm batch (16 blocks) via [`seal_direct_k1`] — the wider batch
 ///   amortizes its shuffle-free rounds from ~9 blocks on.
 ///
@@ -1888,23 +1926,40 @@ pub(crate) unsafe fn seal_direct(
 
     let mut key32 = [0u8; 32];
     if len <= 7 * BLOCK {
-        // Quad batch: blocks 0..8 (key + up to 7 message blocks).
+        // Quad batch: blocks 0..8 (key + up to 7 message blocks). Messages
+        // ≤ 320 B need ≤ 6 blocks — `rounds3` skips the 4th quad's rounds.
         let v = rows(state);
         let base = state.words[12];
-        let ctrs = [
-            ctr_row(state, base, 0),
-            ctr_row(state, base, 1),
-            ctr_row(state, base, 2),
-            ctr_row(state, base, 3),
-        ];
         state.words[12] = 1 + nfull as u32 + u32::from(k > 0);
-        let vs = rounds4(&v, &ctrs);
-        let quads: [(__m256i, __m256i, __m256i, __m256i); 4] = [
-            (vs[0][0], vs[0][1], vs[0][2], vs[0][3]),
-            (vs[1][0], vs[1][1], vs[1][2], vs[1][3]),
-            (vs[2][0], vs[2][1], vs[2][2], vs[2][3]),
-            (vs[3][0], vs[3][1], vs[3][2], vs[3][3]),
-        ];
+        let quads: [(__m256i, __m256i, __m256i, __m256i); 4] = if len <= 5 * BLOCK {
+            let ctrs = [
+                ctr_row(state, base, 0),
+                ctr_row(state, base, 1),
+                ctr_row(state, base, 2),
+            ];
+            let vs = rounds3(&v, &ctrs);
+            [
+                (vs[0][0], vs[0][1], vs[0][2], vs[0][3]),
+                (vs[1][0], vs[1][1], vs[1][2], vs[1][3]),
+                (vs[2][0], vs[2][1], vs[2][2], vs[2][3]),
+                // Dead slot: ≤ 320 B touches at most state block 5 = quad 2.
+                (vs[2][0], vs[2][1], vs[2][2], vs[2][3]),
+            ]
+        } else {
+            let ctrs = [
+                ctr_row(state, base, 0),
+                ctr_row(state, base, 1),
+                ctr_row(state, base, 2),
+                ctr_row(state, base, 3),
+            ];
+            let vs = rounds4(&v, &ctrs);
+            [
+                (vs[0][0], vs[0][1], vs[0][2], vs[0][3]),
+                (vs[1][0], vs[1][1], vs[1][2], vs[1][3]),
+                (vs[2][0], vs[2][1], vs[2][2], vs[2][3]),
+                (vs[3][0], vs[3][1], vs[3][2], vs[3][3]),
+            ]
+        };
         // Block 0's first 32 bytes = the one-time key (quad 0, lane 0).
         unsafe {
             _mm256_storeu_si256(
@@ -1930,7 +1985,11 @@ pub(crate) unsafe fn seal_direct(
         key32.copy_from_slice(&key64[..32]);
     }
 
-    let mut poly = crate::aead::poly_with_aad::<crate::poly1305::ifma::IfmaPoly>(&mut key32, aad);
+    let mut poly_slot =
+        core::mem::MaybeUninit::<crate::poly1305::Poly<crate::poly1305::ifma::IfmaPoly>>::uninit();
+    // SAFETY: callers reached this through the ifma entry points.
+    unsafe { crate::aead::poly_with_aad_at(&mut poly_slot, &mut key32, aad) };
+    let poly = unsafe { &mut *poly_slot.as_mut_ptr() };
 
     // MAC alignment window (the whole buffer is ciphertext by now).
     let m = poly.pending_blocks();
@@ -1939,7 +1998,7 @@ pub(crate) unsafe fn seal_direct(
         unsafe { poly.update(core::slice::from_raw_parts(msg, s)) };
     }
     unsafe { poly.update_tail(core::slice::from_raw_parts(msg.add(s), len - s)) };
-    unsafe { crate::aead::finish_tag(&mut poly, aad.len(), len, tag_out) };
+    unsafe { crate::aead::finish_tag(poly, aad.len(), len, tag_out) };
 }
 
 /// Single-block (64-byte) kernel in XMM registers.

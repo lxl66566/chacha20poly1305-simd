@@ -121,93 +121,6 @@ fn finalize44(h: Limb3, pad: [u64; 2], out: &mut [u8; 16]) {
     out[8..].copy_from_slice(&hi.to_le_bytes());
 }
 
-/// r^8 broadcast for the main loop plus the per-lane collapse powers
-/// `r^(8-LANE_POS[ℓ])` = [r⁸, r⁴, r⁷, r³, r⁶, r², r⁵, r¹] (each with its
-/// `20·limb` companions for the 2^132 wrap-around terms).
-#[derive(Clone)]
-pub(crate) struct Powers {
-    pub(crate) b_r0: __m512i,
-    pub(crate) b_r1: __m512i,
-    pub(crate) b_r2: __m512i,
-    pub(crate) b_s1: __m512i,
-    pub(crate) b_s2: __m512i,
-    l_r0: __m512i,
-    l_r1: __m512i,
-    l_r2: __m512i,
-    l_s1: __m512i,
-    l_s2: __m512i,
-}
-
-impl Powers {
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    pub(crate) unsafe fn new(r: Limb3) -> Self {
-        // Dependency tree (depth 3, was a 7-deep chain): r8 depends on
-        // r2/r4, the odd powers hang off the tree in parallel — the whole
-        // set costs ~3 chained scalar multiplies of latency instead of 7,
-        // which sat directly on the critical path of every short-message
-        // seal (the stream is created between the cipher kernel and the
-        // MAC rounds).
-        let r2 = mul44(r, r);
-        let r4 = mul44(r2, r2);
-        let r8 = mul44(r4, r4);
-        let r3 = mul44(r2, r);
-        let r5 = mul44(r4, r);
-        let r6 = mul44(r4, r2);
-        let r7 = mul44(r4, r3);
-        let lane = [r8, r4, r7, r3, r6, r2, r5, r];
-        debug_assert_eq!(core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]), [
-            8, 4, 7, 3, 6, 2, 5, 1
-        ]);
-        unsafe {
-            let col = |i: usize| {
-                _mm512_setr_epi64(
-                    lane[0][i] as i64,
-                    lane[1][i] as i64,
-                    lane[2][i] as i64,
-                    lane[3][i] as i64,
-                    lane[4][i] as i64,
-                    lane[5][i] as i64,
-                    lane[6][i] as i64,
-                    lane[7][i] as i64,
-                )
-            };
-            let col20 = |i: usize| {
-                _mm512_setr_epi64(
-                    (20 * lane[0][i]) as i64,
-                    (20 * lane[1][i]) as i64,
-                    (20 * lane[2][i]) as i64,
-                    (20 * lane[3][i]) as i64,
-                    (20 * lane[4][i]) as i64,
-                    (20 * lane[5][i]) as i64,
-                    (20 * lane[6][i]) as i64,
-                    (20 * lane[7][i]) as i64,
-                )
-            };
-            Powers {
-                b_r0: _mm512_set1_epi64(r8[0] as i64),
-                b_r1: _mm512_set1_epi64(r8[1] as i64),
-                b_r2: _mm512_set1_epi64(r8[2] as i64),
-                b_s1: _mm512_set1_epi64((20 * r8[1]) as i64),
-                b_s2: _mm512_set1_epi64((20 * r8[2]) as i64),
-                l_r0: col(0),
-                l_r1: col(1),
-                l_r2: col(2),
-                l_s1: col20(1),
-                l_s2: col20(2),
-            }
-        }
-    }
-}
-
-/// Streaming state: one limb per zmm, eight block lanes each.
-#[derive(Clone)]
-pub(crate) struct Stream {
-    pub(crate) h0: __m512i,
-    pub(crate) h1: __m512i,
-    pub(crate) h2: __m512i,
-    pub(crate) powers: Powers,
-}
-
 /// Transpose 128 bytes (blocks 0..=3 at `lo`, 4..=7 at `hi`) into
 /// radix-2^44 limb vectors; lane ℓ holds block [`LANE_POS`]`[ℓ]`.
 #[cfg_attr(not(debug_assertions), inline(always))]
@@ -285,77 +198,102 @@ pub(crate) unsafe fn mul_reduce(
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct IfmaPoly {
     pad: [u64; 2],
     r: Limb3,
-    pub(crate) stream: Option<Stream>,
+    /// Eight block-lane accumulators (valid iff `has_h`). A zero H makes
+    /// the first group's round a pure load (`mul_reduce(0) + T = T`), so
+    /// the fused loops need no first-group special case.
+    pub(crate) h0: __m512i,
+    pub(crate) h1: __m512i,
+    pub(crate) h2: __m512i,
+    has_h: bool,
+    /// Power table, COLUMN-major: `lane_cols[j][i]` = limb j of lane i's
+    /// `r^(8-LANE_POS[i])` (valid iff `has_lanes`), built once when the first
+    /// 8-block group arrives — short MACs that never fill a group pay no
+    /// power computation at all. Columns map straight onto the finalize
+    /// mul_reduce broadcasts (no transpose at the use site).
+    lane_cols: [[u64; 8]; 3],
+    has_lanes: bool,
     // Up to 8 whole blocks are deferred so `absorb4` pairs merge into one
-    // 8-lane round and short messages never pay for the r^2..r^8 powers.
+    // 8-lane round.
     cached: [u8; 128],
     num_cached: usize,
 }
 
-/// Fold one full 8-block group (pointed to by `lo`/`hi`, 64 bytes each)
-/// into the stream (`H ·= r^8; H += T` — the previous H is multiplied
-/// BEFORE the new group joins, so the freshest group never picks up an
-/// extra r^8; OpenSSL orders its loop the same way). Builds the key powers
-/// on first use. Free fn + raw pointers: taking `&mut self` here forced a
-/// 128-byte by-value copy of the block cache on every round.
-#[cfg_attr(not(debug_assertions), inline(always))]
-unsafe fn process8(r: Limb3, stream: &mut Option<Stream>, lo: *const u8, hi: *const u8) {
-    unsafe {
-        let (t0, t1, t2) = load8(lo, hi);
-        match stream {
-            None => {
-                *stream = Some(Stream {
-                    h0: t0,
-                    h1: t1,
-                    h2: t2,
-                    powers: Powers::new(r),
-                });
-            },
-            Some(st) => {
-                let p = &st.powers;
-                let (h0, h1, h2) =
-                    mul_reduce(st.h0, st.h1, st.h2, p.b_r0, p.b_r1, p.b_r2, p.b_s1, p.b_s2);
-                st.h0 = _mm512_add_epi64(h0, t0);
-                st.h1 = _mm512_add_epi64(h1, t1);
-                st.h2 = _mm512_add_epi64(h2, t2);
-            },
-        }
-    }
-}
-
 impl IfmaPoly {
-    /// Fused-kernel support: ensure the streaming state exists. A zero H
-    /// makes the first group's round a pure load (`mul_reduce(0) + T = T`),
-    /// so the fused loop needs no first-group special case.
+    /// Build the scalar power table in place. Dependency tree (depth 3, was
+    /// a 7-deep chain): r8 depends on r2/r4, the odd powers hang off the
+    /// tree in parallel — ~3 chained scalar multiplies of latency.
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    fn build_lanes(&mut self) {
+        debug_assert_eq!(core::array::from_fn::<_, 8, _>(|i| 8 - LANE_POS[i]), [
+            8, 4, 7, 3, 6, 2, 5, 1
+        ]);
+        let r = self.r;
+        let r2 = mul44(r, r);
+        let r4 = mul44(r2, r2);
+        let r8 = mul44(r4, r4);
+        let r3 = mul44(r2, r);
+        let r5 = mul44(r4, r);
+        let r6 = mul44(r4, r2);
+        let r7 = mul44(r4, r3);
+        macro_rules! put {
+            ($i:expr, $v:expr) => {{
+                let v = $v;
+                self.lane_cols[0][$i] = v[0];
+                self.lane_cols[1][$i] = v[1];
+                self.lane_cols[2][$i] = v[2];
+            }};
+        }
+        put!(0, r8);
+        put!(1, r4);
+        put!(2, r7);
+        put!(3, r3);
+        put!(4, r6);
+        put!(5, r2);
+        put!(6, r5);
+        put!(7, r);
+        self.has_lanes = true;
+    }
+
+    /// Fused-kernel support: ensure the streaming state exists (zero H +
+    /// power table). Idempotent.
     #[cfg_attr(not(debug_assertions), inline(always))]
     pub(crate) unsafe fn ensure_stream(&mut self) {
-        if self.stream.is_none() {
-            unsafe {
-                self.stream = Some(Stream {
-                    h0: _mm512_setzero_si512(),
-                    h1: _mm512_setzero_si512(),
-                    h2: _mm512_setzero_si512(),
-                    powers: Powers::new(self.r),
-                });
-            }
+        if !self.has_lanes {
+            self.build_lanes();
         }
+        if !self.has_h {
+            self.h0 = _mm512_setzero_si512();
+            self.h1 = _mm512_setzero_si512();
+            self.h2 = _mm512_setzero_si512();
+            self.has_h = true;
+        }
+    }
+
+    /// r⁸ limbs for the round broadcasts, derived at the fused-kernel call
+    /// sites (5 `vpbroadcastq`s; requires `ensure_stream` first).
+    #[cfg_attr(not(debug_assertions), inline(always))]
+    pub(crate) fn r8_limbs(&self) -> (u64, u64, u64) {
+        (
+            self.lane_cols[0][0],
+            self.lane_cols[1][0],
+            self.lane_cols[2][0],
+        )
     }
 
     #[cfg_attr(not(debug_assertions), inline(always))]
     unsafe fn process_cached(&mut self) {
         debug_assert_eq!(self.num_cached, 8);
         let p = self.cached.as_ptr();
-        unsafe { process8(self.r, &mut self.stream, p, p.add(64)) };
+        unsafe { process8(self, p, p.add(64)) };
         self.num_cached = 0;
     }
 
-    /// Bulk path: the whole run is processed with H and the r^8 power set
-    /// held in registers across rounds (per-64B `absorb4` would round-trip
-    /// the zmm state through the stack every window).
+    /// Bulk path: the whole run is processed with H and the r^8 round
+    /// multipliers held in registers across rounds (per-64B `absorb4` would
+    /// round-trip the zmm state through the stack every window).
     // `#[inline(never)]` + explicit `target_feature`: inlined into the fused
     // engine, this loop's body got jump-threaded into ~30 clones and the
     // poly state spilled to the stack on every round. As a standalone
@@ -374,45 +312,31 @@ impl IfmaPoly {
             }
             // Pair a pending half-cache with the first window.
             if self.num_cached == 4 && !blocks.is_empty() {
-                process8(
-                    self.r,
-                    &mut self.stream,
-                    self.cached.as_ptr(),
-                    blocks.as_ptr(),
-                );
+                process8(self, self.cached.as_ptr(), blocks.as_ptr());
                 blocks = &blocks[64..];
                 self.num_cached = 0;
             }
             if blocks.len() >= 128 {
                 let (mut h0, mut h1, mut h2);
-                let stream_ptr = &raw mut self.stream;
-                match &mut *stream_ptr {
+                if self.has_h {
+                    h0 = self.h0;
+                    h1 = self.h1;
+                    h2 = self.h2;
+                } else {
                     // First group only loads (no r^8 multiply yet).
-                    None => {
-                        (h0, h1, h2) = load8(blocks.as_ptr(), blocks.as_ptr().add(64));
-                        *stream_ptr = Some(Stream {
-                            h0,
-                            h1,
-                            h2,
-                            powers: Powers::new(self.r),
-                        });
-                        blocks = &blocks[128..];
-                    },
-                    Some(st) => {
-                        h0 = st.h0;
-                        h1 = st.h1;
-                        h2 = st.h2;
-                    },
+                    self.ensure_stream();
+                    (h0, h1, h2) = load8(blocks.as_ptr(), blocks.as_ptr().add(64));
+                    blocks = &blocks[128..];
                 }
                 if blocks.len() >= 128 {
-                    // Hoist the powers into locals: 10 zmm registers.
-                    let st = (*stream_ptr).as_mut().unwrap_unchecked();
+                    // Hoist the round multipliers: 5 broadcasts.
+                    let (ra, rb, rc) = self.r8_limbs();
                     let p = (
-                        st.powers.b_r0,
-                        st.powers.b_r1,
-                        st.powers.b_r2,
-                        st.powers.b_s1,
-                        st.powers.b_s2,
+                        _mm512_set1_epi64(ra as i64),
+                        _mm512_set1_epi64(rb as i64),
+                        _mm512_set1_epi64(rc as i64),
+                        _mm512_set1_epi64((20 * rb) as i64),
+                        _mm512_set1_epi64((20 * rc) as i64),
                     );
                     let mut ptr = blocks.as_ptr();
                     let mut left = blocks.len();
@@ -425,12 +349,13 @@ impl IfmaPoly {
                         ptr = ptr.add(128);
                         left -= 128;
                     }
-                    let st = (*stream_ptr).as_mut().unwrap_unchecked();
-                    st.h0 = h0;
-                    st.h1 = h1;
-                    st.h2 = h2;
                     blocks = blocks.split_at(blocks.len() - left).1;
                 }
+                // Single writeback covers both paths: the freshly loaded
+                // first group must survive even when no full round follows.
+                self.h0 = h0;
+                self.h1 = h1;
+                self.h2 = h2;
             }
             // Cache the trailing half-window (0 or 64 bytes).
             if !blocks.is_empty() {
@@ -442,18 +367,57 @@ impl IfmaPoly {
     }
 }
 
+/// Fold one full 8-block group (pointed to by `lo`/`hi`, 64 bytes each)
+/// into the stream (`H ·= r^8; H += T` — the previous H is multiplied
+/// BEFORE the new group joins, so the freshest group never picks up an
+/// extra r^8; OpenSSL orders its loop the same way). Builds the key powers
+/// on first use. Free fn + raw pointers: taking `&mut self` here forced a
+/// 128-byte by-value copy of the block cache on every round.
+#[cfg_attr(not(debug_assertions), inline(always))]
+unsafe fn process8(p: &mut IfmaPoly, lo: *const u8, hi: *const u8) {
+    unsafe {
+        let (t0, t1, t2) = load8(lo, hi);
+        if p.has_h {
+            let (ra, rb, rc) = p.r8_limbs();
+            let (h0, h1, h2) = mul_reduce(
+                p.h0,
+                p.h1,
+                p.h2,
+                _mm512_set1_epi64(ra as i64),
+                _mm512_set1_epi64(rb as i64),
+                _mm512_set1_epi64(rc as i64),
+                _mm512_set1_epi64((20 * rb) as i64),
+                _mm512_set1_epi64((20 * rc) as i64),
+            );
+            p.h0 = _mm512_add_epi64(h0, t0);
+            p.h1 = _mm512_add_epi64(h1, t1);
+            p.h2 = _mm512_add_epi64(h2, t2);
+        } else {
+            p.ensure_stream();
+            p.h0 = t0;
+            p.h1 = t1;
+            p.h2 = t2;
+        }
+    }
+}
+
 impl Backend for IfmaPoly {
     #[cfg_attr(not(debug_assertions), inline(always))]
-    unsafe fn init(key: &[u8; 32]) -> Self {
-        Self {
-            pad: [
+    unsafe fn init_at(out: *mut Self, key: &[u8; 32]) {
+        unsafe {
+            core::ptr::addr_of_mut!((*out).pad).write([
                 u64::from_le_bytes(key[16..24].try_into().unwrap()),
                 u64::from_le_bytes(key[24..32].try_into().unwrap()),
-            ],
-            r: clamp_r(key[..16].try_into().unwrap()),
-            stream: None,
-            cached: [0; 128],
-            num_cached: 0,
+            ]);
+            core::ptr::addr_of_mut!((*out).r).write(clamp_r(key[..16].try_into().unwrap()));
+            core::ptr::addr_of_mut!((*out).h0).write(_mm512_setzero_si512());
+            core::ptr::addr_of_mut!((*out).h1).write(_mm512_setzero_si512());
+            core::ptr::addr_of_mut!((*out).h2).write(_mm512_setzero_si512());
+            core::ptr::addr_of_mut!((*out).has_h).write(false);
+            core::ptr::addr_of_mut!((*out).lane_cols).write([[0; 8]; 3]);
+            core::ptr::addr_of_mut!((*out).has_lanes).write(false);
+            core::ptr::addr_of_mut!((*out).cached).write([0; 128]);
+            core::ptr::addr_of_mut!((*out).num_cached).write(0);
         }
     }
 
@@ -462,7 +426,15 @@ impl Backend for IfmaPoly {
         if self.num_cached == 8 {
             unsafe { self.process_cached() };
         }
-        self.cached[self.num_cached * 16..][..16].copy_from_slice(block);
+        // SAFETY: the drain above keeps `num_cached < 8`, so the 16-byte
+        // window at `num_cached * 16` is inside `cached`. The checked slice
+        // index kept a bounds/panic branch on this per-block hot path.
+        unsafe {
+            self.cached
+                .as_mut_ptr()
+                .add(self.num_cached * 16)
+                .copy_from_nonoverlapping(block.as_ptr(), 16);
+        }
         self.num_cached += 1;
     }
 
@@ -471,14 +443,7 @@ impl Backend for IfmaPoly {
         debug_assert_eq!(self.num_cached % 4, 0, "stream must be 64B-aligned");
         if self.num_cached == 4 {
             // Fuse the cached half with the new one: one 8-lane round.
-            unsafe {
-                process8(
-                    self.r,
-                    &mut self.stream,
-                    self.cached.as_ptr(),
-                    blocks.as_ptr(),
-                );
-            }
+            unsafe { process8(self, self.cached.as_ptr(), blocks.as_ptr()) };
             self.num_cached = 0;
         } else {
             if self.num_cached == 8 {
@@ -506,10 +471,13 @@ impl Backend for IfmaPoly {
         unsafe {
             core::ptr::write_volatile(&raw mut self.pad, [0; 2]);
             core::ptr::write_volatile(&raw mut self.r, [0; 3]);
-            if let Some(st) = &mut self.stream {
-                core::ptr::write_volatile(&raw mut *st, core::mem::zeroed());
-            }
+            core::ptr::write_volatile(&raw mut self.h0, _mm512_setzero_si512());
+            core::ptr::write_volatile(&raw mut self.h1, _mm512_setzero_si512());
+            core::ptr::write_volatile(&raw mut self.h2, _mm512_setzero_si512());
+            core::ptr::write_volatile(&raw mut self.lane_cols, [[0; 8]; 3]);
         }
+        self.has_h = false;
+        self.has_lanes = false;
         zeroize::Zeroize::zeroize(&mut self.cached);
         self.num_cached = 0;
     }
@@ -518,21 +486,30 @@ impl Backend for IfmaPoly {
     unsafe fn finalize_into(&mut self, out: &mut [u8; 16]) {
         debug_assert!(self.num_cached <= 8);
         let mut acc: Limb3 = [0; 3];
-        if let Some(st) = self.stream.take() {
+        if self.has_h {
+            self.has_h = false;
             // Collapse the 8 lanes: H · per-lane r^(8-pos), then sum lanes.
-            let p = &st.powers;
-            let (h0, h1, h2) =
-                unsafe { mul_reduce(st.h0, st.h1, st.h2, p.l_r0, p.l_r1, p.l_r2, p.l_s1, p.l_s2) };
-            let (mut a0, mut a1, mut a2) = ([0u64; 8], [0u64; 8], [0u64; 8]);
+            // The column-major table loads straight into the mul_reduce
+            // broadcasts; 20·x = (x<<4)+(x<<2) (no scalar column build).
+            let (c0, c1, c2) = unsafe {
+                (
+                    _mm512_loadu_si512(self.lane_cols[0].as_ptr().cast()),
+                    _mm512_loadu_si512(self.lane_cols[1].as_ptr().cast()),
+                    _mm512_loadu_si512(self.lane_cols[2].as_ptr().cast()),
+                )
+            };
+            let (d1, d2) = unsafe {
+                (
+                    _mm512_add_epi64(_mm512_slli_epi64::<4>(c1), _mm512_slli_epi64::<2>(c1)),
+                    _mm512_add_epi64(_mm512_slli_epi64::<4>(c2), _mm512_slli_epi64::<2>(c2)),
+                )
+            };
+            let (h0, h1, h2) = unsafe { mul_reduce(self.h0, self.h1, self.h2, c0, c1, c2, d1, d2) };
+            // Bit-identical to an unsigned horizontal sum (two's complement).
             unsafe {
-                _mm512_storeu_si512(a0.as_mut_ptr().cast(), h0);
-                _mm512_storeu_si512(a1.as_mut_ptr().cast(), h1);
-                _mm512_storeu_si512(a2.as_mut_ptr().cast(), h2);
-            }
-            for i in 0..8 {
-                acc[0] += a0[i];
-                acc[1] += a1[i];
-                acc[2] += a2[i];
+                acc[0] = _mm512_reduce_add_epi64(h0) as u64;
+                acc[1] = _mm512_reduce_add_epi64(h1) as u64;
+                acc[2] = _mm512_reduce_add_epi64(h2) as u64;
             }
             acc[1] += acc[0] >> 44;
             acc[0] &= M44;

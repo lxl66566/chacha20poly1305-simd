@@ -194,18 +194,28 @@ fn ct_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
 pub(crate) const SMALL_MAX: usize = 3 * BLOCK;
 
 /// Init the Poly1305 state from the one-time key (scrubbed afterwards when
-/// `zeroize` is on) and absorb the zero-padded AAD.
+/// `zeroize` is on) and absorb the zero-padded AAD. Constructs directly in
+/// `slot`: a by-value `Poly` return lowers to a whole-struct libc memcpy
+/// for the wide SIMD backends (~60 cycles per seal).
+///
+/// # Safety
+///
+/// The caller must guarantee the backend's CPU features (runtime dispatch
+/// does at the public API boundary).
 #[cfg_attr(not(debug_assertions), inline(always))]
-pub(crate) unsafe fn poly_with_aad<B: crate::poly1305::Backend>(
+pub(crate) unsafe fn poly_with_aad_at<B: crate::poly1305::Backend>(
+    slot: &mut core::mem::MaybeUninit<Poly<B>>,
     key: &mut [u8; 32],
     aad: &[u8],
-) -> Poly<B> {
-    let mut poly = Poly::<B>::new(key);
-    crate::poly1305::clear_key(key);
-    poly.update(aad);
-    let aad_pad = (16 - aad.len() % 16) % 16;
-    poly.update(&[0u8; 16][..aad_pad]);
-    poly
+) {
+    unsafe {
+        Poly::<B>::new_at(slot.as_mut_ptr(), key);
+        let poly = &mut *slot.as_mut_ptr();
+        crate::poly1305::clear_key(key);
+        poly.update(aad);
+        let aad_pad = (16 - aad.len() % 16) % 16;
+        poly.update(&[0u8; 16][..aad_pad]);
+    }
 }
 
 /// Small-path MAC sweep: absorb `data` (the ≤ [`SMALL_MAX`]-byte ciphertext)
@@ -324,7 +334,9 @@ unsafe fn process<O: Ops, const SEAL: bool>(
             let mut key32 = [0u8; 32];
             let mut ks1 = [0u8; BLOCK];
             O::gen_key_xor2(state, &mut key32, &mut ks1);
-            let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
+            let mut poly_slot = core::mem::MaybeUninit::<Poly<O::Poly>>::uninit();
+            poly_with_aad_at(&mut poly_slot, &mut key32, aad);
+            let poly = &mut *poly_slot.as_mut_ptr();
             if !SEAL {
                 poly.update(msg);
             }
@@ -332,7 +344,7 @@ unsafe fn process<O: Ops, const SEAL: bool>(
             if SEAL {
                 poly.update(msg);
             }
-            finish_tag(&mut poly, aad.len(), msg.len(), tag_out);
+            finish_tag(poly, aad.len(), msg.len(), tag_out);
             return;
         }
 
@@ -342,18 +354,26 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         // as a single sweep over the contiguous message buffer (mac_small_sweep).
         if msg.len() <= SMALL_MAX {
             let mut key32 = [0u8; 32];
-            let mut ks = [0u8; SMALL_MAX];
+            // `ks` is write-only before the XOR: `gen_ks_small` fills the
+            // first `n` bytes, only `msg.len() ≤ n` are read — skip the
+            // 192-byte stack zeroing (3 zmm stores on the hot path).
+            let mut ks = core::mem::MaybeUninit::<[u8; SMALL_MAX]>::uninit();
+            // SAFETY: gen_ks_small writes exactly the first `n ≥ msg.len()`
+            // bytes; nothing reads past `msg.len()`.
+            let ks = ks.assume_init_mut();
             let n = msg.len().div_ceil(BLOCK) * BLOCK;
             O::gen_ks_small(state, &mut key32, &mut ks[..n]);
-            let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
+            let mut poly_slot = core::mem::MaybeUninit::<Poly<O::Poly>>::uninit();
+            poly_with_aad_at(&mut poly_slot, &mut key32, aad);
+            let poly = &mut *poly_slot.as_mut_ptr();
             // The xor lands on whichever side of the MAC sweep the pipeline
             // stage requires: seal MACs the produced ciphertext (xor first),
             // open MACs the received ciphertext (xor after).
             if SEAL {
                 crate::chacha::xor_bytes(msg, &ks[..msg.len()]);
-                mac_small_sweep(&mut poly, msg, aad.len());
+                mac_small_sweep(poly, msg, aad.len());
             } else {
-                mac_small_sweep(&mut poly, msg, aad.len());
+                mac_small_sweep(poly, msg, aad.len());
                 crate::chacha::xor_bytes(msg, &ks[..msg.len()]);
             }
             poly.finalize_into(tag_out);
@@ -385,7 +405,9 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         } else {
             O::gen_key_xor2(state, &mut key32, &mut ks1);
         }
-        let mut poly = poly_with_aad::<O::Poly>(&mut key32, aad);
+        let mut poly_slot = core::mem::MaybeUninit::<Poly<O::Poly>>::uninit();
+        poly_with_aad_at(&mut poly_slot, &mut key32, aad);
+        let poly = &mut *poly_slot.as_mut_ptr();
 
         // ── MAC/keystream interleave ──
         // The Poly1305 stream (AAD zero-padded) is generally NOT aligned with the
@@ -427,7 +449,7 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                 if poly.pending_blocks() == 0 && avail >= batch {
                     // Fused bulk run: the MAC over earlier batches is
                     // interleaved with the cipher batch-by-batch.
-                    let (no, np) = O::seal_bulk(state, msg, off, poly_off, &mut poly);
+                    let (no, np) = O::seal_bulk(state, msg, off, poly_off, poly);
                     off = no;
                     poly_off = np;
                 } else {
@@ -472,7 +494,7 @@ unsafe fn process<O: Ops, const SEAL: bool>(
                         && msg.len() - off >= batch
                         && msg.len() - poly_off >= batch
                     {
-                        let (no, np) = O::open_bulk(state, msg, off, poly_off, &mut poly);
+                        let (no, np) = O::open_bulk(state, msg, off, poly_off, poly);
                         off = no;
                         poly_off = np;
                         continue;
@@ -518,9 +540,9 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         // interleaved iterations whose MAC lags one batch).
         if O::FUSED_MEDIUM && (off < msg.len() || (!SEAL && poly_off < msg.len())) {
             let (no, np) = if SEAL {
-                O::seal_medium(state, msg, off, poly_off, &mut poly)
+                O::seal_medium(state, msg, off, poly_off, poly)
             } else {
-                O::open_medium(state, msg, off, poly_off, &mut poly)
+                O::open_medium(state, msg, off, poly_off, poly)
             };
             off = no;
             poly_off = np;
@@ -554,6 +576,6 @@ unsafe fn process<O: Ops, const SEAL: bool>(
         debug_assert_eq!(poly_off, msg.len());
 
         // ── Zero-pad the ciphertext, absorb lengths, emit tag ──
-        finish_tag(&mut poly, aad.len(), msg.len(), tag_out);
+        finish_tag(poly, aad.len(), msg.len(), tag_out);
     }
 }
