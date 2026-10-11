@@ -21,6 +21,8 @@ import os
 SIZES = [16, 31, 64, 128, 256, 512, 1024, 4096, 16384, 65536, 262144, 1048576]
 
 # tier -> (target dir, our bench id, RustCrypto bench id)
+# Criterion sanitizes `|` to `_` in directory names (the avx2/avx512 tiers'
+# rc tags use `poly-auto(avx2|soft)` as the bench id).
 TIERS = {
     "soft": ("target/bench-soft", "soft", "rc-soft+poly-soft"),
     "sse2": ("target/bench-sse2", "sse2", "rc-sse2+poly-soft"),
